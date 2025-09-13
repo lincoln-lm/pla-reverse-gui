@@ -576,7 +576,7 @@ class GeneratorThread(QThread):
                 (
                     0,
                     [np.uint8(0)],
-                    (np.uint16(0), np.uint8(0), np.bool(0)),
+                    (np.uint16(0), np.uint8(0), np.bool_(0)),
                     np.uint32(0),
                     np.uint32(0),
                     np.zeros(6, np.uint8),
