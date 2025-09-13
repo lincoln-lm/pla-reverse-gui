@@ -1,3 +1,4 @@
+numba==0.60.0
 numba-pokemon-prngs @ git+https://github.com/Lincoln-LM/numba_pokemon_prngs@311dc2d76ed48541bf3ac11f0fca58c3f03e6ea2
 platformdirs==3.1.1
 pyopencl==2024.2.7
