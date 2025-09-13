@@ -38,6 +38,7 @@ class MapWindow(QWidget):
         LAArea.OBSIDIAN_FIELDLANDS: "obsidianfieldlands",
         LAArea.CRIMSON_MIRELANDS: "crimsonmirelands",
         LAArea.COBALT_COASTLANDS: "cobaltcoastlands",
+        LAArea.SEASIDE_HOLLOW: "seasidehollow",
         LAArea.CORONET_HIGHLANDS: "coronethighlands",
         LAArea.ALABASTER_ICELANDS: "alabastericelands",
     }
@@ -202,7 +203,7 @@ class MapWindow(QWidget):
                 mass_outbreak = spawner.is_mass_outbreak
                 massive_mass_outbreak = mass_outbreak and (
                     np.uint64(spawner.encounter_table_id)
-                    not in ENCOUNTER_INFORMATION_LA[map_id]
+                    not in ENCOUNTER_INFORMATION_LA[map_id & 0xFF]
                 )
                 single_spawner = (
                     spawner.min_spawn_count == spawner.max_spawn_count
@@ -252,7 +253,7 @@ class MapWindow(QWidget):
             mass_outbreak = spawner.is_mass_outbreak
             massive_mass_outbreak = mass_outbreak and (
                 np.uint64(spawner.encounter_table_id)
-                not in ENCOUNTER_INFORMATION_LA[self.location_combobox.currentData()]
+                not in ENCOUNTER_INFORMATION_LA[self.location_combobox.currentData() & 0xFF]
             )
             single_spawner = (
                 spawner.min_spawn_count == spawner.max_spawn_count
@@ -285,14 +286,14 @@ class MapWindow(QWidget):
         """Callback to be run when the map combobox is changed"""
         map_id: LAArea = self.location_combobox.itemData(index)
         self.spawner_information = SPAWNER_INFORMATION_LA[map_id].spawners
-        self.encounter_information = ENCOUNTER_INFORMATION_LA[map_id]
+        self.encounter_information = ENCOUNTER_INFORMATION_LA[map_id & 0xFF]
         if not hasattr(self, "map"):
             return
         self.map.setView([4096, 4096], 1)
         if self.tile_layer is not None:
             self.map.removeLayer(self.tile_layer)
         self.tile_layer = L.tileLayer(
-            f"https://www.serebii.net/pokearth/hisui/{self.MAP_NAMES[map_id]}/tile_{{z}}-{{x}}-{{y}}.png",
+            f"https://www.serebii.net/pokearth/hisui/{self.MAP_NAMES[map_id & 0xFF]}/tile_{{z}}-{{x}}-{{y}}.png",
             options="""{
             minZoom: 0,
             maxZoom: 2,
@@ -409,7 +410,7 @@ class MapWindow(QWidget):
             is_alpha_spawner = all(
                 slot.is_alpha
                 for slot in ENCOUNTER_INFORMATION_LA[
-                    self.location_combobox.currentData()
+                    self.location_combobox.currentData() & 0xFF
                 ][np.uint64(spawner.encounter_table_id)].slots.view(np.recarray)
             )
             self.seed_finder_button.setDisabled(is_alpha_spawner)
@@ -418,7 +419,7 @@ class MapWindow(QWidget):
             # is MMO
             if spawner.is_mass_outbreak and (
                 np.uint64(spawner.encounter_table_id)
-                not in ENCOUNTER_INFORMATION_LA[self.location_combobox.currentData()]
+                not in ENCOUNTER_INFORMATION_LA[self.location_combobox.currentData() & 0xFF]
             ):
                 self.first_wave_combobox.setVisible(True)
                 self.second_wave_combobox.setVisible(True)
@@ -450,7 +451,7 @@ class MapWindow(QWidget):
                         ].slots.view(np.recarray)
                     )
                     if np.uint64(spawner.encounter_table_id)
-                    in ENCOUNTER_INFORMATION_LA[self.location_combobox.currentData()]
+                    in ENCOUNTER_INFORMATION_LA[self.location_combobox.currentData() & 0xFF]
                     else "Encounter table not found."
                 )
                 # should only apply to unown, truncate spawner summary to 15 lines
@@ -468,7 +469,7 @@ class MapWindow(QWidget):
         spawner = self.spawner_information[self.spawner_combobox.currentIndex()]
         if spawner.is_mass_outbreak and (
             np.uint64(spawner.encounter_table_id)
-            not in ENCOUNTER_INFORMATION_LA[self.location_combobox.currentData()]
+            not in ENCOUNTER_INFORMATION_LA[self.location_combobox.currentData() & 0xFF]
         ):
             encounter_table = self.encounter_information[
                 np.uint64(
@@ -493,7 +494,7 @@ class MapWindow(QWidget):
         # is MMO
         if spawner.is_mass_outbreak and (
             np.uint64(spawner.encounter_table_id)
-            not in ENCOUNTER_INFORMATION_LA[self.location_combobox.currentData()]
+            not in ENCOUNTER_INFORMATION_LA[self.location_combobox.currentData() & 0xFF]
         ):
             first_encounter_table = self.encounter_information[
                 np.uint64(
