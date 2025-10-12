@@ -407,7 +407,7 @@ class MapWindow(QWidget):
         if marker in self.rendered_markers:
             self.spawner_combobox.setCurrentIndex(self.rendered_markers.index(marker))
             spawner: PlacementSpawner8a = self.spawner_combobox.currentData()
-            is_alpha_spawner = all(
+            is_alpha_spawner = not spawner.is_mass_outbreak and all(
                 slot.is_alpha
                 for slot in ENCOUNTER_INFORMATION_LA[
                     self.location_combobox.currentData() & 0xFF
