@@ -28,7 +28,7 @@ from qtpy.QtWidgets import (
     QTableWidgetItem,
     QSpinBox,
 )
-from qtpy.QtGui import QRegularExpressionValidator
+from qtpy.QtGui import QRegularExpressionValidator, QColor
 from qtpy import QtCore
 from qtpy.QtCore import QThread, Signal, Qt
 
@@ -87,6 +87,7 @@ def labled_widget(
     """Build a labled widget"""
     outer_widget = QWidget()
     layout = QHBoxLayout(outer_widget)
+    layout.setSpacing(2)
     label_widget = QLabel(label)
     layout.addWidget(label_widget)
     widget = widget_constructor(*args, **kwargs)
@@ -96,7 +97,7 @@ def labled_widget(
 
 class GeneratorWindow(QDialog):
     """Spawner generator window"""
-
+    
     def __init__(
         self,
         parent: QWidget,
@@ -131,6 +132,17 @@ class GeneratorWindow(QDialog):
         self.seed_base_combobox = QComboBox()
         self.seed_base_combobox.addItem("Hexadecimal", 16)
         self.seed_base_combobox.addItem("Decimal", 10)
+        
+        self.header_widget = QWidget()
+        self.header_layout = QHBoxLayout(self.header_widget)
+
+        self.toggle_settings_display_button = QPushButton("▼ Hide Settings")
+        self.toggle_settings_display_button.setCheckable(True)
+        self.toggle_settings_display_button.setChecked(True)
+        self.toggle_settings_display_button.clicked.connect(self.hide_show_settings)
+        
+        self.header_layout.addWidget(self.toggle_settings_display_button)
+        
         def seed_base_changed(index: int) -> None:
             is_hex = index == 0
             previous_text = self.seed_input.text()
@@ -148,6 +160,7 @@ class GeneratorWindow(QDialog):
             self.seed_input.setText(
                 (f"{seed_value:X}" if is_hex else f"{seed_value}") if seed_value else ""
             )
+            
         self.seed_base_combobox.currentIndexChanged.connect(seed_base_changed)
         seed_base_changed(0)
         self.settings_layout.addWidget(self.seed_base_combobox)
@@ -170,7 +183,7 @@ class GeneratorWindow(QDialog):
         self.settings_layout.addWidget(time_widget)
         spawn_count_label = QLabel("Spawn Count:")
         spawn_count_label.setVisible(bool(self.spawner.is_mass_outbreak))
-        self.settings_layout.addWidget(spawn_count_label)
+        self.settings_layout.addWidget(spawn_count_label, 2, )
         self.first_wave_spawn_count, first_wave_spawn_count_widget = labled_widget("First Wave:", QSpinBox, minimum=8, maximum=10)
         first_wave_spawn_count_widget.setVisible(bool(self.spawner.is_mass_outbreak))
         self.second_wave_spawn_count, second_wave_spawn_count_widget = labled_widget("Second Wave:", QSpinBox, minimum=6, maximum=8)
@@ -203,6 +216,7 @@ class GeneratorWindow(QDialog):
             shiny_rolls_combobox, shiny_rolls_outer = labled_widget(
                 species_name, QComboBox
             )
+            
             for item in (
                 ("Base Research", 1),
                 ("Research Level 10", 2),
@@ -211,11 +225,12 @@ class GeneratorWindow(QDialog):
                 ("Shiny Charm + Perfect Research", 7),
             ):
                 shiny_rolls_combobox.addItem(*item)
-            self.settings_layout.addWidget(shiny_rolls_outer)
-            self.shiny_rolls_comboboxes[
-                slot.species
-            ] = shiny_rolls_combobox
-        starting_path_label = QLabel("Spawn Count Values:" if is_variable else "Starting Path:")
+                self.settings_layout.addWidget(shiny_rolls_outer)
+                self.shiny_rolls_comboboxes[
+                    slot.species
+                ] = shiny_rolls_combobox
+        
+        starting_path_label = QLabel("<b>Spawn Count Values:</b>" if is_variable else "<b>Starting Path:</b>")
         starting_path_label.setVisible(self.spawner.max_spawn_count > 1 and not self.spawner.is_mass_outbreak)
         self.settings_layout.addWidget(starting_path_label)
         self.starting_path_input = QLineEdit()
@@ -237,6 +252,7 @@ class GeneratorWindow(QDialog):
             self.species_filter.add_checked_item(
                 get_name_en(*species_form), species_form
             )
+
         self.gender_filter, gender_widget = labled_widget(
             "Gender Filter:", CheckableComboBox
         )
@@ -244,7 +260,7 @@ class GeneratorWindow(QDialog):
         self.gender_filter.add_checked_item("Male", 0)
         self.gender_filter.add_checked_item("Female", 1)
         self.nature_filter, nature_widget = labled_widget(
-            "Nature Filter:", CheckableComboBox
+            "Nature:", CheckableComboBox
         )
         self.nature_filter: CheckableComboBox
         for i, nature in enumerate(NATURES_EN):
@@ -258,14 +274,18 @@ class GeneratorWindow(QDialog):
         self.alpha_filter = QCheckBox("Alpha Only")
         self.shortest_path_filter = QCheckBox("Only Shortest Path")
         self.shortest_path_filter.setChecked(True)
+        self.chain_results_filter = QCheckBox("Only Chain Results")
+        
+        self.shortest_path_filter.clicked.connect(self.shortest_path_or_chain_results)
+        self.chain_results_filter.clicked.connect(self.shortest_path_or_chain_results)
 
         self.size_filter, size_widget = labled_widget(
-            "Height/Scale Filter:", CheckableComboBox
+            "Height/Scale:", CheckableComboBox
         )
         self.size_filter: CheckableComboBox
         self.size_filter.add_checked_item("XXXS (0)", 0)
         self.size_filter.add_checked_item("XXXL (255)", 255)
-
+        
         self.filter_layout.addWidget(species_widget)
         self.filter_layout.addWidget(gender_widget)
         self.filter_layout.addWidget(nature_widget)
@@ -273,6 +293,7 @@ class GeneratorWindow(QDialog):
         self.filter_layout.addWidget(size_widget)
         self.filter_layout.addWidget(self.alpha_filter)
         self.filter_layout.addWidget(self.shortest_path_filter)
+        self.filter_layout.addWidget(self.chain_results_filter)
 
         self.iv_filter_widget = QWidget()
         self.iv_filter_layout = QVBoxLayout(self.iv_filter_widget)
@@ -284,9 +305,10 @@ class GeneratorWindow(QDialog):
             RangeWidget(0, 31, "SpD:"),
             RangeWidget(0, 31, "Spe:"),
         )
+                                                        
         for iv_filter in self.iv_filters:
             self.iv_filter_layout.addWidget(iv_filter)
-
+        
         self.top_layout.addWidget(self.settings_widget)
         self.top_layout.addWidget(self.iv_filter_widget)
         self.top_layout.addWidget(self.filter_widget)
@@ -297,6 +319,7 @@ class GeneratorWindow(QDialog):
         self.generate_button.clicked.connect(self.generate)
 
         self.result_table = ResultTableWidget()
+        self.main_layout.addWidget(self.header_widget)
         self.main_layout.addWidget(self.top_widget)
         self.main_layout.addWidget(self.generate_button)
         self.main_layout.addWidget(self.progress_bar)
@@ -304,7 +327,13 @@ class GeneratorWindow(QDialog):
         self.resize(
             sum(column[1] for column in self.result_table.COLUMNS),
             self.height(),
+        
         )
+        
+    def hide_show_settings(self):
+        visible = self.toggle_settings_display_button.isChecked()
+        self.top_widget.setVisible(visible)
+        self.toggle_settings_display_button.setText("▼ Hide Settings" if visible else "▶ Display Settings")
 
     def generate(self) -> None:
         """Generate paths for spawner"""
@@ -335,6 +364,8 @@ class GeneratorWindow(QDialog):
         shiny_filter = self.shiny_filter.currentData() or 15
         alpha_filter = self.alpha_filter.checkState() == QtCore.Qt.Checked
         shortest_path_filter = self.shortest_path_filter.checkState() == QtCore.Qt.Checked
+        chain_results_filter = self.chain_results_filter.isChecked()
+        
         iv_filters = tuple(
             (iv_range.start, iv_range.stop - 1)
             for iv_range in (iv_filter.get_range() for iv_filter in self.iv_filters)
@@ -361,6 +392,7 @@ class GeneratorWindow(QDialog):
                 True,
                 False,
                 shortest_path_filter,
+                chain_results_filter,
                 seed,
                 self.first_wave_spawn_count.value(),
                 self.second_wave_spawn_count.value() if self.has_second_wave else 0,
@@ -380,6 +412,7 @@ class GeneratorWindow(QDialog):
                 False,
                 True,
                 shortest_path_filter,
+                chain_results_filter,
                 seed,
                 starting_path,
                 self.spawner.max_spawn_count,
@@ -400,6 +433,7 @@ class GeneratorWindow(QDialog):
                 False,
                 False,
                 shortest_path_filter,
+                chain_results_filter,
                 seed,
                 starting_path,
                 advance_range.start,
@@ -447,7 +481,7 @@ class GeneratorWindow(QDialog):
         self.result_table.species_info = species_info
         self.result_table.spawn_counts = starting_path
 
-    def add_result(self, row: tuple):
+    def add_result(self, row: tuple, group_id: int):
         (
             advance,
             path,
@@ -470,14 +504,28 @@ class GeneratorWindow(QDialog):
         display_size_imperial = calc_display_size(
             personal_index, height, weight, imperial=True
         )
+                
         row_i = self.result_table.rowCount()
         self.result_table.insertRow(row_i)
+        
+        # Wurmple evolution determination by adding an extension -Cascoon or -Silcoon
+        if species == 265:
+            first_16_bits = (_encryption_constant >> 16) & 0xFFFF
+            if (first_16_bits % 10) > 4:
+                extension = "-Cascoon"
+            else:
+                extension = "-Silcoon"
+        else:
+            extension = ""
+
+        species_name = get_name_en(species, form, is_alpha) + extension
+        
         row = (
             advance,
             path_to_string(path)
             if self.spawner.max_spawn_count != 1
             else "N/A",
-            get_name_en(species, form, is_alpha),
+            species_name,
             "Square" if shiny == 2 else "Star" if shiny else "No",
             "Yes" if is_alpha else "No",
             NATURES_EN[nature],
@@ -488,21 +536,46 @@ class GeneratorWindow(QDialog):
             "♂" if gender == 0 else "♀" if gender == 1 else "○",
             f"{display_size_metric[0]:.02f} m | {display_size_imperial[0][0]:.00f}'{display_size_imperial[0][1]:.00f}\" ({height})",
             f"{display_size_metric[1]:.02f} kg | {display_size_imperial[1]:.01f} lbs ({weight})",
+            group_id,
         )
         for j, value in enumerate(row):
             item = QTableWidgetItem()
             item.setData(Qt.EditRole, value)
+            *_, group_id = row
+            if (group_id + 1) % 2:
+                item.setBackground(QColor(35, 55, 75))
             self.result_table.setItem(row_i, j, item)
-        # sort by paths first
-        self.result_table.model().sort(1, Qt.AscendingOrder)
-        # then by advances
-        self.result_table.model().sort(0, Qt.AscendingOrder)
-
+            
+        if self.chain_results_filter.isChecked():
+            # Then sort by advances first
+            self.result_table.model().sort(0, Qt.AscendingOrder)
+            # Then sort by paths
+            self.result_table.model().sort(1, Qt.AscendingOrder)
+            # Then sort by group_id
+            self.result_table.model().sort(17, Qt.AscendingOrder)
+                    
+        else:
+            # Sort by paths first
+            self.result_table.model().sort(1, Qt.AscendingOrder)
+            # then by advances
+            self.result_table.model().sort(0, Qt.AscendingOrder)
+            
+        
+        
+    
     def closeEvent(self, event):
         if self.generator_update_thread is not None:
             self.generator_update_thread.requestInterruption()
             self.generator_update_thread.wait()
         event.accept()
+        
+    def shortest_path_or_chain_results(self):
+        """Ensures that Only shortest path and chain results are exclusive"""
+        if self.sender().isChecked():
+            if self.sender() == self.shortest_path_filter:
+                self.chain_results_filter.setChecked(False)
+            else:
+                self.shortest_path_filter.setChecked(False)
 
 
 class GeneratorUpdateThread(QThread):
@@ -512,12 +585,13 @@ class GeneratorUpdateThread(QThread):
     progress = Signal(int)
     new_result = Signal(tuple)
 
-    def __init__(self, parent_window: GeneratorWindow, is_mass_outbreak: bool, is_variable: bool, shortest_path_only: bool, *args) -> None:
+    def __init__(self, parent_window: GeneratorWindow, is_mass_outbreak: bool, is_variable: bool, shortest_path_only: bool, chain_results: bool, *args) -> None:
         super().__init__()
         self.parent_window = parent_window
         self.parent_data_hook = np.zeros(2, np.uint64)
         self.generator_thread = GeneratorThread(is_mass_outbreak, is_variable, *args, self.parent_data_hook)
         self.shortest_path_only = shortest_path_only
+        self.chain_results = chain_results
         self.args = args
 
     def run(self) -> None:
@@ -531,6 +605,9 @@ class GeneratorUpdateThread(QThread):
 
         result_count = 0
         result_ids = set()
+        result_paths = set()
+        group_id = 0
+
         while True:
             # checking here ensures final copied data is from after the thread finishes
             thread_finished = (
@@ -542,15 +619,38 @@ class GeneratorUpdateThread(QThread):
             self.progress.emit(progress)
             # copy here to dodge thread issues
             results = list(self.generator_thread.results)
+            if self.chain_results:
+                is_chain_result = False
             if len(results) > result_count:
                 for row in results[result_count:]:
+                    advance, path, species, ec, pid, *_ = row
+                    path_str = path_to_string(path)
+                    result_id = ec | (pid << 32)
+                    
                     if self.shortest_path_only:
-                        result_id = row[3] | (row[4] << 32)
                         if result_id not in result_ids:
-                            self.parent_window.add_result(row)
+                            self.parent_window.add_result(row, group_id)
                             result_ids.add(result_id)
+                    
+                    elif self.chain_results:
+                        # Check path relationships
+                        for row_2 in results[result_count:]:
+                            path_str_2 = path_to_string(row_2[1])
+                            is_chain = path_str.startswith(path_str_2 + "->")
+                            if is_chain and result_id not in result_ids:
+                                result_id_2 = row_2[3] | (row_2[4] << 32)
+                                if result_id_2 not in result_ids or path_str_2 not in result_paths:
+                                    result_ids.add(result_id_2)
+                                    result_paths.add(path_str_2)
+                                    group_id += 1
+                                    self.parent_window.add_result(row_2, group_id)
+                                    
+                                self.parent_window.add_result(row, group_id)
+                                result_ids.add(result_id)
+                                result_paths.add(path_str)
+                                        
                     else:
-                        self.parent_window.add_result(row)
+                        self.parent_window.add_result(row, group_id)
                 result_count = len(results)
             if (
                 progress == total_progress
