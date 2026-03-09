@@ -278,6 +278,8 @@ class GeneratorWindow(QDialog):
         
         self.shortest_path_filter.clicked.connect(self.shortest_path_or_chain_results)
         self.chain_results_filter.clicked.connect(self.shortest_path_or_chain_results)
+        
+        self.chain_results_filter.toggled.connect(lambda checked: self.min_depth_spin.setEnabled(checked))
 
         self.size_filter, size_widget = labled_widget(
             "Height/Scale:", CheckableComboBox
@@ -481,7 +483,7 @@ class GeneratorWindow(QDialog):
         self.result_table.species_info = species_info
         self.result_table.spawn_counts = starting_path
 
-    def add_result(self, row: tuple, group_id: int):
+    def add_result(self, row: tuple, group_tuple: tuple):
         (
             advance,
             path,
@@ -496,6 +498,7 @@ class GeneratorWindow(QDialog):
             height,
             weight,
         ) = row
+        
         personal_info = get_personal_info(species, form)
         personal_index = get_personal_index(species, form)
         display_size_metric = calc_display_size(
@@ -520,6 +523,9 @@ class GeneratorWindow(QDialog):
 
         species_name = get_name_en(species, form, is_alpha) + extension
         
+        # Format group tuple as zero‑padded string (e.g., 0002.0001.0001)
+        group_str = '.'.join(f"{part:03d}" for part in group_tuple)
+        
         row = (
             advance,
             path_to_string(path)
@@ -536,28 +542,19 @@ class GeneratorWindow(QDialog):
             "♂" if gender == 0 else "♀" if gender == 1 else "○",
             f"{display_size_metric[0]:.02f} m | {display_size_imperial[0][0]:.00f}'{display_size_imperial[0][1]:.00f}\" ({height})",
             f"{display_size_metric[1]:.02f} kg | {display_size_imperial[1]:.01f} lbs ({weight})",
-            group_id,
+            group_str,
         )
         for j, value in enumerate(row):
             item = QTableWidgetItem()
             item.setData(Qt.EditRole, value)
-            *_, group_id = row
-            if (group_id + 1) % 2:
+            if (group_tuple[0] + 1) % 2:
                 item.setBackground(QColor(35, 55, 75))
             self.result_table.setItem(row_i, j, item)
-            
+
         if self.chain_results_filter.isChecked():
-            # Then sort by advances first
-            self.result_table.model().sort(0, Qt.AscendingOrder)
-            # Then sort by paths
-            self.result_table.model().sort(1, Qt.AscendingOrder)
-            # Then sort by group_id
-            self.result_table.model().sort(17, Qt.AscendingOrder)
-                    
+            self.result_table.model().sort(16, Qt.AscendingOrder)
         else:
-            # Sort by paths first
             self.result_table.model().sort(1, Qt.AscendingOrder)
-            # then by advances
             self.result_table.model().sort(0, Qt.AscendingOrder)
             
         
@@ -605,8 +602,10 @@ class GeneratorUpdateThread(QThread):
 
         result_count = 0
         result_ids = set()
-        result_paths = set()
-        group_id = 0
+        path_to_indices = {}          # path tuple -> list of indices in self.generator_thread.results
+        index_groups = {}              # index -> list of group IDs
+        current_root_id = 0
+        group_child_count = {}         # parent tuple -> next child index
 
         while True:
             # checking here ensures final copied data is from after the thread finishes
@@ -619,38 +618,59 @@ class GeneratorUpdateThread(QThread):
             self.progress.emit(progress)
             # copy here to dodge thread issues
             results = list(self.generator_thread.results)
-            if self.chain_results:
-                is_chain_result = False
+            #if self.chain_results:
+            #    is_chain_result = False
             if len(results) > result_count:
-                for row in results[result_count:]:
+                for abs_index, row in enumerate(results[result_count:], start=result_count):
                     advance, path, species, ec, pid, *_ = row
+                    p = tuple(path)
                     path_str = path_to_string(path)
                     result_id = ec | (pid << 32)
                     
+                    path_to_indices.setdefault(p, []).append(abs_index)
+                    
                     if self.shortest_path_only:
                         if result_id not in result_ids:
-                            self.parent_window.add_result(row, group_id)
+                            self.parent_window.add_result(row, (0,))
                             result_ids.add(result_id)
                     
                     elif self.chain_results:
-                        # Check path relationships
-                        for row_2 in results[result_count:]:
-                            path_str_2 = path_to_string(row_2[1])
-                            is_chain = path_str.startswith(path_str_2 + "->")
-                            if is_chain and result_id not in result_ids:
-                                result_id_2 = row_2[3] | (row_2[4] << 32)
-                                if result_id_2 not in result_ids or path_str_2 not in result_paths:
-                                    result_ids.add(result_id_2)
-                                    result_paths.add(path_str_2)
-                                    group_id += 1
-                                    self.parent_window.add_result(row_2, group_id)
-                                    
-                                self.parent_window.add_result(row, group_id)
-                                result_ids.add(result_id)
-                                result_paths.add(path_str)
-                                        
+                        parent_prefixes = []
+                        for i in range(1, len(p)):
+                            prefix = p[:i]
+                            if prefix in path_to_indices:
+                                parent_prefixes.append(prefix)
+
+                        if parent_prefixes:
+                            # Use the longest parent path
+                            longest_parent = max(parent_prefixes, key=len)
+                            for parent_idx in path_to_indices[longest_parent]:
+                                parent_row = results[parent_idx]
+
+                                parent_groups = index_groups.get(parent_idx, [])
+                                if not parent_groups:
+                                    # Add parent as a new root group (tuple)
+                                    new_root = (current_root_id,)
+                                    self.parent_window.add_result(parent_row, new_root)
+                                    parent_groups = [new_root]
+                                    index_groups[parent_idx] = parent_groups
+                                    current_root_id += 1
+
+                                for parent_group in parent_groups:
+                                    child_num = group_child_count.get(parent_group, 1)
+                                    child_group = parent_group + (child_num,)
+                                    group_child_count[parent_group] = child_num + 1
+
+                                    current_groups = index_groups.get(abs_index, [])
+                                    if child_group not in current_groups:
+                                        self.parent_window.add_result(row, child_group)
+                                        current_groups.append(child_group)
+                                        index_groups[abs_index] = current_groups
+                        # No else – skip when no parent
+
                     else:
-                        self.parent_window.add_result(row, group_id)
+                        self.parent_window.add_result(row, (0,))
+                        
                 result_count = len(results)
             if (
                 progress == total_progress
