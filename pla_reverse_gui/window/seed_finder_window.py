@@ -18,7 +18,7 @@ from qtpy.QtWidgets import (
 )
 
 # pylint: enable=no-name-in-module
-from qtpy.QtCore import Qt
+from qtpy.QtCore import Qt, QSettings
 
 from .pokemon_info_widget import PokemonInfoWidget
 from .eta_progress_bar import ETAProgressBar
@@ -106,6 +106,39 @@ class SeedFinderWindow(QDialog):
             spawner,
             encounter_table,
         )
+        
+        # Load settings and apply to the two Pokemon widgets
+        settings = QSettings("PLAReverseGUI", "Settings")
+        global_shiny_charm = settings.value("shinyCharm", False, bool)
+
+        def update_shiny_rolls_from_settings(widget):
+            species = widget.species_combobox.currentData()
+            if species is None:
+                return
+            research_level = settings.value(f"species/{species}/researchLevel", 0, int)
+            # Map research level and charm to combobox index (same as generator window)
+            if research_level == 0:          # Base
+                target_index = 3 if global_shiny_charm else 0
+            elif research_level == 1:        # Level 10
+                target_index = 3 if global_shiny_charm else 1
+            else:                            # Perfect
+                target_index = 4 if global_shiny_charm else 2
+            # Ensure the combobox has at least these items
+            if widget.shiny_rolls_combobox.count() > target_index:
+                widget.shiny_rolls_combobox.setCurrentIndex(target_index)
+
+        # Apply initial settings
+        update_shiny_rolls_from_settings(self.pokemon_1)
+        update_shiny_rolls_from_settings(self.pokemon_2)
+
+        # Connect species change signals to keep shiny rolls updated
+        self.pokemon_1.species_combobox.currentIndexChanged.connect(
+            lambda: update_shiny_rolls_from_settings(self.pokemon_1)
+        )
+        self.pokemon_2.species_combobox.currentIndexChanged.connect(
+            lambda: update_shiny_rolls_from_settings(self.pokemon_2)
+        )
+        
         self.compute_seed_button = QPushButton("Compute Group Seed")
         self.compute_seed_button.clicked.connect(self.compute_seed)
 
