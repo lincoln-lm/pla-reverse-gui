@@ -28,23 +28,6 @@ class SettingsDialog(QDialog):
         # Main layout
         layout = QVBoxLayout(self)
 
-        # Top row: Shiny charm + "Change all to"
-        top_row = QHBoxLayout()
-        self.charm_check = QCheckBox("Shiny Charm")
-        self.charm_check.setChecked(self.shiny_charm)
-        self.charm_check.toggled.connect(self.on_charm_toggled)
-        top_row.addWidget(self.charm_check)
-
-        top_row.addStretch()
-
-        top_row.addWidget(QLabel("Change all to:"))
-        self.change_all_combo = QComboBox()
-        self.change_all_combo.addItems(["Base Research", "Research Level 10", "Perfect Research"])
-        self.change_all_combo.currentIndexChanged.connect(self.change_all_research_level)
-        top_row.addWidget(self.change_all_combo)
-
-        layout.addLayout(top_row)
-
         # Shiny search checkbox
         self.shiny_search_check = QCheckBox("Always search for shiny Pokemon")
         self.shiny_search_check.setChecked(self.always_shiny)
@@ -88,6 +71,23 @@ class SettingsDialog(QDialog):
         self.alpha_search_check = QCheckBox("Always search for alpha Pokemon")
         self.alpha_search_check.setChecked(self.always_alpha)
         layout.addWidget(self.alpha_search_check)
+        
+        # Bottom row: Shiny charm + "Change all to"
+        bottom_row = QHBoxLayout()
+        self.charm_check = QCheckBox("Shiny Charm")
+        self.charm_check.setChecked(self.shiny_charm)
+        self.charm_check.toggled.connect(self.on_charm_toggled)
+        bottom_row.addWidget(self.charm_check)
+
+        bottom_row.addStretch()
+
+        bottom_row.addWidget(QLabel("Change all to:"))
+        self.change_all_combo = QComboBox()
+        self.change_all_combo.addItems(["Base Research", "Research Level 10", "Perfect Research"])
+        self.change_all_combo.currentIndexChanged.connect(self.change_all_research_level)
+        bottom_row.addWidget(self.change_all_combo)
+
+        layout.addLayout(bottom_row)
 
         # Table for species research levels
         self.table = QTableWidget()
