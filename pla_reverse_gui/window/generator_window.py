@@ -278,8 +278,6 @@ class GeneratorWindow(QDialog):
         
         self.shortest_path_filter.clicked.connect(self.shortest_path_or_chain_results)
         self.chain_results_filter.clicked.connect(self.shortest_path_or_chain_results)
-        
-        self.chain_results_filter.toggled.connect(lambda checked: self.min_depth_spin.setEnabled(checked))
 
         self.size_filter, size_widget = labled_widget(
             "Height/Scale:", CheckableComboBox
