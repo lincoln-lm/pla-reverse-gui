@@ -148,7 +148,6 @@ class GeneratorWindow(QDialog):
             self.seed_input.setText(
                 (f"{seed_value:X}" if is_hex else f"{seed_value}") if seed_value else ""
             )
-
         self.seed_base_combobox.currentIndexChanged.connect(seed_base_changed)
         seed_base_changed(0)
         self.settings_layout.addWidget(self.seed_base_combobox)

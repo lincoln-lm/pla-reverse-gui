@@ -32,7 +32,6 @@ from .generator_window import GeneratorWindow
 from .checkable_combobox_widget import CheckableComboBox
 
 
-
 class MapWindow(QWidget):
     """QWidget window for main map display"""
 
