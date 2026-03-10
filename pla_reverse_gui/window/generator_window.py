@@ -131,7 +131,6 @@ class GeneratorWindow(QDialog):
         self.seed_base_combobox = QComboBox()
         self.seed_base_combobox.addItem("Hexadecimal", 16)
         self.seed_base_combobox.addItem("Decimal", 10)
-
         def seed_base_changed(index: int) -> None:
             is_hex = index == 0
             previous_text = self.seed_input.text()
@@ -149,7 +148,7 @@ class GeneratorWindow(QDialog):
             self.seed_input.setText(
                 (f"{seed_value:X}" if is_hex else f"{seed_value}") if seed_value else ""
             )
-            
+
         self.seed_base_combobox.currentIndexChanged.connect(seed_base_changed)
         seed_base_changed(0)
         self.settings_layout.addWidget(self.seed_base_combobox)
@@ -233,8 +232,6 @@ class GeneratorWindow(QDialog):
             self.shiny_rolls_comboboxes[
                 slot.species
             ] = shiny_rolls_combobox
-
-        
         starting_path_label = QLabel("Spawn Count Values:" if is_variable else "Starting Path:")
         starting_path_label.setVisible(self.spawner.max_spawn_count > 1 and not self.spawner.is_mass_outbreak)
         self.settings_layout.addWidget(starting_path_label)
@@ -257,7 +254,6 @@ class GeneratorWindow(QDialog):
             self.species_filter.add_checked_item(
                 get_name_en(*species_form), species_form
             )
-
         self.gender_filter, gender_widget = labled_widget(
             "Gender Filter:", CheckableComboBox
         )
@@ -305,7 +301,6 @@ class GeneratorWindow(QDialog):
             RangeWidget(0, 31, "SpD:"),
             RangeWidget(0, 31, "Spe:"),
         )
-
         for iv_filter in self.iv_filters:
             self.iv_filter_layout.addWidget(iv_filter)
 
@@ -437,7 +432,6 @@ class GeneratorWindow(QDialog):
                 False,
                 False,
                 shortest_path_filter,
-                chain_results_filter,
                 seed,
                 starting_path,
                 advance_range.start,
@@ -508,7 +502,6 @@ class GeneratorWindow(QDialog):
         display_size_imperial = calc_display_size(
             personal_index, height, weight, imperial=True
         )
-
         row_i = self.result_table.rowCount()
         self.result_table.insertRow(row_i)
         row = (
