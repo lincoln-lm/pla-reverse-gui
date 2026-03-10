@@ -28,7 +28,7 @@ from qtpy.QtWidgets import (
     QTableWidgetItem,
     QSpinBox,
 )
-from qtpy.QtGui import QRegularExpressionValidator, QColor
+from qtpy.QtGui import QRegularExpressionValidator
 from qtpy import QtCore
 from qtpy.QtCore import QThread, Signal, Qt, QSettings
 
@@ -87,7 +87,6 @@ def labled_widget(
     """Build a labled widget"""
     outer_widget = QWidget()
     layout = QHBoxLayout(outer_widget)
-    layout.setSpacing(2)
     label_widget = QLabel(label)
     layout.addWidget(label_widget)
     widget = widget_constructor(*args, **kwargs)
@@ -97,7 +96,7 @@ def labled_widget(
 
 class GeneratorWindow(QDialog):
     """Spawner generator window"""
-    
+
     def __init__(
         self,
         parent: QWidget,
@@ -132,10 +131,7 @@ class GeneratorWindow(QDialog):
         self.seed_base_combobox = QComboBox()
         self.seed_base_combobox.addItem("Hexadecimal", 16)
         self.seed_base_combobox.addItem("Decimal", 10)
-        
-        self.header_widget = QWidget()
-        self.header_layout = QHBoxLayout(self.header_widget)
-        
+
         def seed_base_changed(index: int) -> None:
             is_hex = index == 0
             previous_text = self.seed_input.text()
@@ -176,7 +172,7 @@ class GeneratorWindow(QDialog):
         self.settings_layout.addWidget(time_widget)
         spawn_count_label = QLabel("Spawn Count:")
         spawn_count_label.setVisible(bool(self.spawner.is_mass_outbreak))
-        self.settings_layout.addWidget(spawn_count_label, 2, )
+        self.settings_layout.addWidget(spawn_count_label)
         self.first_wave_spawn_count, first_wave_spawn_count_widget = labled_widget("First Wave:", QSpinBox, minimum=8, maximum=10)
         first_wave_spawn_count_widget.setVisible(bool(self.spawner.is_mass_outbreak))
         self.second_wave_spawn_count, second_wave_spawn_count_widget = labled_widget("Second Wave:", QSpinBox, minimum=6, maximum=8)
@@ -209,7 +205,6 @@ class GeneratorWindow(QDialog):
             shiny_rolls_combobox, shiny_rolls_outer = labled_widget(
                 species_name, QComboBox
             )
-            
             for item in (
                 ("Base Research", 1),
                 ("Research Level 10", 2),
@@ -240,7 +235,7 @@ class GeneratorWindow(QDialog):
             ] = shiny_rolls_combobox
 
         
-        starting_path_label = QLabel("<b>Spawn Count Values:</b>" if is_variable else "<b>Starting Path:</b>")
+        starting_path_label = QLabel("Spawn Count Values:" if is_variable else "Starting Path:")
         starting_path_label.setVisible(self.spawner.max_spawn_count > 1 and not self.spawner.is_mass_outbreak)
         self.settings_layout.addWidget(starting_path_label)
         self.starting_path_input = QLineEdit()
@@ -270,7 +265,7 @@ class GeneratorWindow(QDialog):
         self.gender_filter.add_checked_item("Male", 0)
         self.gender_filter.add_checked_item("Female", 1)
         self.nature_filter, nature_widget = labled_widget(
-            "Nature:", CheckableComboBox
+            "Nature Filter:", CheckableComboBox
         )
         self.nature_filter: CheckableComboBox
         for i, nature in enumerate(NATURES_EN):
@@ -286,12 +281,12 @@ class GeneratorWindow(QDialog):
         self.shortest_path_filter.setChecked(True)
 
         self.size_filter, size_widget = labled_widget(
-            "Height/Scale:", CheckableComboBox
+            "Height/Scale Filter:", CheckableComboBox
         )
         self.size_filter: CheckableComboBox
         self.size_filter.add_checked_item("XXXS (0)", 0)
         self.size_filter.add_checked_item("XXXL (255)", 255)
-        
+
         self.filter_layout.addWidget(species_widget)
         self.filter_layout.addWidget(gender_widget)
         self.filter_layout.addWidget(nature_widget)
@@ -310,10 +305,10 @@ class GeneratorWindow(QDialog):
             RangeWidget(0, 31, "SpD:"),
             RangeWidget(0, 31, "Spe:"),
         )
-                                                        
+
         for iv_filter in self.iv_filters:
             self.iv_filter_layout.addWidget(iv_filter)
-        
+
         self.top_layout.addWidget(self.settings_widget)
         self.top_layout.addWidget(self.iv_filter_widget)
         self.top_layout.addWidget(self.filter_widget)
@@ -324,7 +319,6 @@ class GeneratorWindow(QDialog):
         self.generate_button.clicked.connect(self.generate)
 
         self.result_table = ResultTableWidget()
-        self.main_layout.addWidget(self.header_widget)
         self.main_layout.addWidget(self.top_widget)
         self.main_layout.addWidget(self.generate_button)
         self.main_layout.addWidget(self.progress_bar)
@@ -347,7 +341,6 @@ class GeneratorWindow(QDialog):
         self.resize(
             sum(column[1] for column in self.result_table.COLUMNS),
             self.height(),
-        
         )
 
     def generate(self) -> None:
@@ -405,7 +398,6 @@ class GeneratorWindow(QDialog):
                 True,
                 False,
                 shortest_path_filter,
-                chain_results_filter,
                 seed,
                 self.first_wave_spawn_count.value(),
                 self.second_wave_spawn_count.value() if self.has_second_wave else 0,
@@ -425,7 +417,6 @@ class GeneratorWindow(QDialog):
                 False,
                 True,
                 shortest_path_filter,
-                chain_results_filter,
                 seed,
                 starting_path,
                 self.spawner.max_spawn_count,
@@ -494,7 +485,7 @@ class GeneratorWindow(QDialog):
         self.result_table.species_info = species_info
         self.result_table.spawn_counts = starting_path
 
-    def add_result(self, row: tuple, group_id: int):
+    def add_result(self, row: tuple):
         (
             advance,
             path,
@@ -517,7 +508,7 @@ class GeneratorWindow(QDialog):
         display_size_imperial = calc_display_size(
             personal_index, height, weight, imperial=True
         )
-                
+
         row_i = self.result_table.rowCount()
         self.result_table.insertRow(row_i)
         row = (
@@ -536,7 +527,6 @@ class GeneratorWindow(QDialog):
             "♂" if gender == 0 else "♀" if gender == 1 else "○",
             f"{display_size_metric[0]:.02f} m | {display_size_imperial[0][0]:.00f}'{display_size_imperial[0][1]:.00f}\" ({height})",
             f"{display_size_metric[1]:.02f} kg | {display_size_imperial[1]:.01f} lbs ({weight})",
-            group_id,
         )
         for j, value in enumerate(row):
             item = QTableWidgetItem()
@@ -546,20 +536,12 @@ class GeneratorWindow(QDialog):
         self.result_table.model().sort(1, Qt.AscendingOrder)
         # then by advances
         self.result_table.model().sort(0, Qt.AscendingOrder)
-    
+
     def closeEvent(self, event):
         if self.generator_update_thread is not None:
             self.generator_update_thread.requestInterruption()
             self.generator_update_thread.wait()
         event.accept()
-        
-    def shortest_path_or_chain_results(self):
-        """Ensures that Only shortest path and chain results are exclusive"""
-        if self.sender().isChecked():
-            if self.sender() == self.shortest_path_filter:
-                self.chain_results_filter.setChecked(False)
-            else:
-                self.shortest_path_filter.setChecked(False)
 
 
 class GeneratorUpdateThread(QThread):
