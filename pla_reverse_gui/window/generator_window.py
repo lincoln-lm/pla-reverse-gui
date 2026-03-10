@@ -135,13 +135,6 @@ class GeneratorWindow(QDialog):
         
         self.header_widget = QWidget()
         self.header_layout = QHBoxLayout(self.header_widget)
-
-        self.toggle_settings_display_button = QPushButton("▼ Hide Settings")
-        self.toggle_settings_display_button.setCheckable(True)
-        self.toggle_settings_display_button.setChecked(True)
-        self.toggle_settings_display_button.clicked.connect(self.hide_show_settings)
-        
-        self.header_layout.addWidget(self.toggle_settings_display_button)
         
         def seed_base_changed(index: int) -> None:
             is_hex = index == 0
@@ -291,10 +284,6 @@ class GeneratorWindow(QDialog):
         self.alpha_filter = QCheckBox("Alpha Only")
         self.shortest_path_filter = QCheckBox("Only Shortest Path")
         self.shortest_path_filter.setChecked(True)
-        self.chain_results_filter = QCheckBox("Only Chain Results")
-        
-        self.shortest_path_filter.clicked.connect(self.shortest_path_or_chain_results)
-        self.chain_results_filter.clicked.connect(self.shortest_path_or_chain_results)
 
         self.size_filter, size_widget = labled_widget(
             "Height/Scale:", CheckableComboBox
@@ -310,7 +299,6 @@ class GeneratorWindow(QDialog):
         self.filter_layout.addWidget(size_widget)
         self.filter_layout.addWidget(self.alpha_filter)
         self.filter_layout.addWidget(self.shortest_path_filter)
-        self.filter_layout.addWidget(self.chain_results_filter)
 
         self.iv_filter_widget = QWidget()
         self.iv_filter_layout = QVBoxLayout(self.iv_filter_widget)
@@ -361,11 +349,6 @@ class GeneratorWindow(QDialog):
             self.height(),
         
         )
-        
-    def hide_show_settings(self):
-        visible = self.toggle_settings_display_button.isChecked()
-        self.top_widget.setVisible(visible)
-        self.toggle_settings_display_button.setText("▼ Hide Settings" if visible else "▶ Display Settings")
 
     def generate(self) -> None:
         """Generate paths for spawner"""
@@ -396,8 +379,6 @@ class GeneratorWindow(QDialog):
         shiny_filter = self.shiny_filter.currentData() or 15
         alpha_filter = self.alpha_filter.checkState() == QtCore.Qt.Checked
         shortest_path_filter = self.shortest_path_filter.checkState() == QtCore.Qt.Checked
-        chain_results_filter = self.chain_results_filter.isChecked()
-        
         iv_filters = tuple(
             (iv_range.start, iv_range.stop - 1)
             for iv_range in (iv_filter.get_range() for iv_filter in self.iv_filters)
@@ -539,25 +520,12 @@ class GeneratorWindow(QDialog):
                 
         row_i = self.result_table.rowCount()
         self.result_table.insertRow(row_i)
-        
-        # Wurmple evolution determination by adding an extension -C or -S
-        if species == 265:
-            first_16_bits = (_encryption_constant >> 16) & 0xFFFF
-            if (first_16_bits % 10) > 4:
-                extension = "-Cascoon"
-            else:
-                extension = "-Silcoon"
-        else:
-            extension = ""
-
-        species_name = get_name_en(species, form, is_alpha) + extension
-        
         row = (
             advance,
             path_to_string(path)
             if self.spawner.max_spawn_count != 1
             else "N/A",
-            species_name,
+            get_name_en(species, form, is_alpha),
             "Square" if shiny == 2 else "Star" if shiny else "No",
             "Yes" if is_alpha else "No",
             NATURES_EN[nature],
@@ -573,27 +541,11 @@ class GeneratorWindow(QDialog):
         for j, value in enumerate(row):
             item = QTableWidgetItem()
             item.setData(Qt.EditRole, value)
-            *_, group_id = row
-            if (group_id + 1) % 2:
-                item.setBackground(QColor(35, 55, 75))
             self.result_table.setItem(row_i, j, item)
-            
-        if self.chain_results_filter.isChecked():
-            # Then sort by advances first
-            self.result_table.model().sort(0, Qt.AscendingOrder)
-            # Then sort by paths
-            self.result_table.model().sort(1, Qt.AscendingOrder)
-            # Then sort by group_id
-            self.result_table.model().sort(17, Qt.AscendingOrder)
-                    
-        else:
-            # Sort by paths first
-            self.result_table.model().sort(1, Qt.AscendingOrder)
-            # then by advances
-            self.result_table.model().sort(0, Qt.AscendingOrder)
-            
-        
-        
+        # sort by paths first
+        self.result_table.model().sort(1, Qt.AscendingOrder)
+        # then by advances
+        self.result_table.model().sort(0, Qt.AscendingOrder)
     
     def closeEvent(self, event):
         if self.generator_update_thread is not None:
@@ -617,13 +569,12 @@ class GeneratorUpdateThread(QThread):
     progress = Signal(int)
     new_result = Signal(tuple)
 
-    def __init__(self, parent_window: GeneratorWindow, is_mass_outbreak: bool, is_variable: bool, shortest_path_only: bool, chain_results: bool, *args) -> None:
+    def __init__(self, parent_window: GeneratorWindow, is_mass_outbreak: bool, is_variable: bool, shortest_path_only: bool, *args) -> None:
         super().__init__()
         self.parent_window = parent_window
         self.parent_data_hook = np.zeros(2, np.uint64)
         self.generator_thread = GeneratorThread(is_mass_outbreak, is_variable, *args, self.parent_data_hook)
         self.shortest_path_only = shortest_path_only
-        self.chain_results = chain_results
         self.args = args
 
     def run(self) -> None:
@@ -637,9 +588,6 @@ class GeneratorUpdateThread(QThread):
 
         result_count = 0
         result_ids = set()
-        result_paths = set()
-        group_id = 0
-
         while True:
             # checking here ensures final copied data is from after the thread finishes
             thread_finished = (
@@ -651,38 +599,15 @@ class GeneratorUpdateThread(QThread):
             self.progress.emit(progress)
             # copy here to dodge thread issues
             results = list(self.generator_thread.results)
-            if self.chain_results:
-                is_chain_result = False
             if len(results) > result_count:
                 for row in results[result_count:]:
-                    advance, path, species, ec, pid, *_ = row
-                    path_str = path_to_string(path)
-                    result_id = ec | (pid << 32)
-                    
                     if self.shortest_path_only:
+                        result_id = row[3] | (row[4] << 32)
                         if result_id not in result_ids:
-                            self.parent_window.add_result(row, group_id)
+                            self.parent_window.add_result(row)
                             result_ids.add(result_id)
-                    
-                    elif self.chain_results:
-                        # Check path relationships
-                        for row_2 in results[result_count:]:
-                            path_str_2 = path_to_string(row_2[1])
-                            is_chain = path_str.startswith(path_str_2 + "->")
-                            if is_chain and result_id not in result_ids:
-                                result_id_2 = row_2[3] | (row_2[4] << 32)
-                                if result_id_2 not in result_ids or path_str_2 not in result_paths:
-                                    result_ids.add(result_id_2)
-                                    result_paths.add(path_str_2)
-                                    group_id += 1
-                                    self.parent_window.add_result(row_2, group_id)
-                                    
-                                self.parent_window.add_result(row, group_id)
-                                result_ids.add(result_id)
-                                result_paths.add(path_str)
-                                        
                     else:
-                        self.parent_window.add_result(row, group_id)
+                        self.parent_window.add_result(row)
                 result_count = len(results)
             if (
                 progress == total_progress
