@@ -34,12 +34,13 @@ class ResultTableWidget(QTableWidget):
         ("Gender", 70),
         ("Height", 80),
         ("Weight", 80),
+        ("Group", 100),
     )
 
     def __init__(self):
         super().__init__()
 
-        self.setColumnCount(16)
+        self.setColumnCount(17)
         self.setHorizontalHeaderLabels([column[0] for column in self.COLUMNS])
         for i, (_, width) in enumerate(self.COLUMNS):
             self.setColumnWidth(i, width)
