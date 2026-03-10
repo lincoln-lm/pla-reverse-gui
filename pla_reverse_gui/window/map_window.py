@@ -27,8 +27,10 @@ from qtpy.QtWidgets import (
 
 from ..util import get_name_en
 from .seed_finder_window import SeedFinderWindow
+from ..settings_dialog import SettingsDialog
 from .generator_window import GeneratorWindow
 from .checkable_combobox_widget import CheckableComboBox
+
 
 
 class MapWindow(QWidget):
@@ -93,6 +95,8 @@ class MapWindow(QWidget):
         )
         self.second_wave_combobox.setHidden(True)
         self.spawner_summary = QLabel("")
+        self.settings_button = QPushButton("Settings")
+        self.settings_button.clicked.connect(self.open_settings)
         self.seed_finder_button = QPushButton("Seed Finder")
         self.seed_finder_button.clicked.connect(self.open_seed_finder)
         self.generator_button = QPushButton("Open Generator")
@@ -104,6 +108,7 @@ class MapWindow(QWidget):
         self.options_layout.addWidget(self.first_wave_combobox)
         self.options_layout.addWidget(self.second_wave_combobox)
         self.options_layout.addWidget(self.spawner_summary)
+        self.options_layout.addWidget(self.settings_button)
         self.options_layout.addWidget(self.seed_finder_button)
         self.options_layout.addWidget(self.generator_button)
 
@@ -463,6 +468,11 @@ class MapWindow(QWidget):
             f"{marker.jsName}.setIcon({self.selected_marker_icon.jsName})"
         )
         self.selected_marker = marker
+        
+    def open_settings(self) -> None:
+        """Open the preferences dialog"""
+        dlg = SettingsDialog(self)
+        dlg.exec_()
 
     def open_seed_finder(self) -> None:
         """Open Seed Finder for spawner"""
