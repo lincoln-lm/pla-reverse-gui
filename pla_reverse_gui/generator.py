@@ -45,6 +45,8 @@ def generate_mass_outbreak(
     shiny_filter: np.uint8,
     alpha_filter: np.uint8,
     iv_filters: tuple,
+    weather: LAWeather,
+    time: LATime,
     parent_data: np.ndarray,
     results: TypedList,
 ):
@@ -162,6 +164,8 @@ def generate_mass_outbreak(
                 np.uint8(shiny),
                 np.uint8(height),
                 np.uint8(weight),
+                np.uint8(weather.value),
+                np.uint8(time.value),
             )
             results.append(pokemon)
             # TODO: level rand?
@@ -214,8 +218,6 @@ def generate_variable(
     count_values: tuple[int],
     max_spawn_count: int,
     encounter_table: EncounterAreaLA,
-    weather: LAWeather,
-    time: LATime,
     species_info: dict[tuple[int, int], tuple[int, int, bool]],
     gender_filter: tuple,
     nature_filter: tuple,
@@ -223,6 +225,8 @@ def generate_variable(
     shiny_filter: np.uint8,
     alpha_filter: np.uint8,
     iv_filters: tuple,
+    weather: LAWeather,
+    time: LATime,
     parent_data: np.ndarray,
     results: TypedList,
 ):
@@ -339,6 +343,8 @@ def generate_variable(
                 np.uint8(shiny),
                 np.uint8(height),
                 np.uint8(weight),
+                np.uint8(weather.value),
+                np.uint8(time.value),
             )
             results.append(pokemon)
             # TODO: level rand?
@@ -362,8 +368,6 @@ def generate_standard(
     max_adv: int,
     spawn_count: int,
     encounter_table: EncounterAreaLA,
-    weather: LAWeather,
-    time: LATime,
     species_info: dict[tuple[int, int], tuple[int, int, bool]],
     gender_filter: tuple,
     nature_filter: tuple,
@@ -371,6 +375,8 @@ def generate_standard(
     shiny_filter: np.uint8,
     alpha_filter: np.uint8,
     iv_filters: tuple,
+    weather: LAWeather,
+    time: LATime,
     parent_data: np.ndarray,
     results: TypedList,
 ):
@@ -379,7 +385,7 @@ def generate_standard(
     parent_data[0]: external uint64 count of how many pokemon have been checked
     parent_data[1]: external bool (as uint64) flag for if the search should still run (threading)
     """
-
+    
     # faster to reinit rather than create new objects
     group_rng = Xoroshiro128PlusRejection(0, 0)
     generator_rng = Xoroshiro128PlusRejection(0, 0)
@@ -495,6 +501,8 @@ def generate_standard(
                     np.uint8(shiny),
                     np.uint8(height),
                     np.uint8(weight),
+                    np.uint8(weather.value),
+                    np.uint8(time.value),
                 )
                 results.append(pokemon)
                 # TODO: level rand?

@@ -3,6 +3,7 @@
 import time
 import numpy as np
 import numba
+import sys
 from numba.typed import List as TypedList
 from numba_pokemon_prngs.data.encounter import (
     ENCOUNTER_TABLE_NAMES_LA,
@@ -28,9 +29,11 @@ from qtpy.QtWidgets import (
     QTableWidgetItem,
     QSpinBox,
 )
-from qtpy.QtGui import QRegularExpressionValidator
+from qtpy.QtGui import QRegularExpressionValidator, QIcon
 from qtpy import QtCore
 from qtpy.QtCore import QThread, Signal, Qt
+
+from pathlib import Path
 
 # pylint: enable=no-name-in-module
 
@@ -156,13 +159,18 @@ class GeneratorWindow(QDialog):
         self.settings_layout.addWidget(settings_label)
         self.weather_combobox, weather_widget = labled_widget("Weather:", QComboBox)
         self.weather_combobox: QComboBox
+        if not self.spawner.is_mass_outbreak:
+            self.weather_combobox.addItem("All Weathers", None)
         for weather in LAWeather:
             if weather != LAWeather.NONE:
                 self.weather_combobox.addItem(weather.name.title(), weather)
         self.time_combobox, time_widget = labled_widget("Time:", QComboBox)
         self.time_combobox: QComboBox
+        if not self.spawner.is_mass_outbreak:
+            self.time_combobox.addItem("All Times", None)
         for time in LATime:
             self.time_combobox.addItem(time.name.title(), time)
+        self._time_equiv_cache = {}   # key: weather_val, value: dict mapping time_val -> category
         settings_label.setVisible(not self.spawner.is_mass_outbreak)
         weather_widget.setVisible(not self.spawner.is_mass_outbreak)
         time_widget.setVisible(not self.spawner.is_mass_outbreak)
@@ -305,6 +313,149 @@ class GeneratorWindow(QDialog):
             sum(column[1] for column in self.result_table.COLUMNS),
             self.height(),
         )
+        
+    def get_distinct_combos(self, area: EncounterAreaLA, time_filter=None, weather_filter=None):
+        times = list(LATime)
+        weathers = list(LAWeather)
+        combos = []
+        seen = set()
+
+        if len(area.slots) == 0:
+            return combos
+            
+        base_probs = area.slots['base_probability']
+        time_mult = area.slots['time_multipliers']   # shape (n_slots, len(LATime))
+        weather_mult = area.slots['weather_multipliers']
+        
+        for t in times:
+            if time_filter is not None and t != time_filter:
+                continue
+            t_idx = t.value
+            for w in weathers:
+                if weather_filter is not None and w != weather_filter:
+                    continue
+                w_idx = w.value
+                probs = base_probs * time_mult[:, t_idx] * weather_mult[:, w_idx]
+                total = np.sum(probs)
+                if total > 0:
+                    norm_probs = probs / total
+                else:
+                    norm_probs = probs
+                # quantize to avoid floating noise
+                key = tuple(np.round(norm_probs, decimals=6))
+                if key not in seen:
+                    seen.add(key)
+                    combos.append((t, w))
+        return combos
+        
+    def _get_time_category_map(self, weather_val):
+        """Return a dict mapping time value -> category for the given weather."""
+        if weather_val in self._time_equiv_cache:
+            return self._time_equiv_cache[weather_val]
+
+        base_probs = self.encounter_table.slots['base_probability']
+        time_mult = self.encounter_table.slots['time_multipliers']
+        weather_mult = self.encounter_table.slots['weather_multipliers']
+        w_idx = weather_val
+
+        # Compute normalised probability vector for each time
+        vectors = {}
+        for t in LATime:
+            probs = base_probs * time_mult[:, t.value] * weather_mult[:, w_idx]
+            total = np.sum(probs)
+            norm = probs / total if total > 0 else probs
+            vectors[t] = tuple(np.round(norm, decimals=6))
+
+        # Group times by identical vector
+        groups = {}
+        for t, vec in vectors.items():
+            groups.setdefault(vec, []).append(t)
+
+        # Determine category for each group and build mapping
+        category_map = {}
+        for vec, times in groups.items():
+            time_set = set(times)
+            if time_set == {LATime.DAWN, LATime.DAY, LATime.DUSK}:
+                cat = 'daytime'
+            elif time_set == {LATime.NIGHT}:
+                cat = 'night'
+            elif time_set == set(LATime):
+                cat = 'anytime'
+            else:
+                cat = None   # fallback to individual icons
+            for t in times:
+                category_map[t.value] = cat
+
+        self._time_equiv_cache[weather_val] = category_map
+        return category_map
+        
+    def get_icon_path(self, icon_name: str) -> str:
+        """ Return absolute path to an icon file in resources/Icons """
+        current_dir = Path(__file__).parent
+        package_root = current_dir.parent
+        icon_path = package_root / "Resources" / "Icons" / icon_name
+        return str(icon_path)
+        
+    def get_weather_icon(self, weather_val):
+        """Return QIcon for given weather value (or None)"""
+        try:
+            weather_name = LAWeather(weather_val).name.lower()
+        except ValueError:
+            return None
+
+        icon_map = {
+            'sunny': 'weather_sunny.png',
+            'cloudy': 'weather_cloudy.png',
+            'rain': 'weather_rain.png',
+            'snow': 'weather_snow.png',
+            'drought': 'weather_drought.png',
+            'fog': 'weather_fog.png',
+            'rainstorm': 'weather_rainstorm.png',
+            'snowstorm': 'weather_snowstorm.png',
+            'none': 'weather_none.png',
+        }
+        
+        filename = icon_map.get(weather_name)
+        if filename:
+            path = self.get_icon_path(filename)
+            return QIcon(path)
+        return None
+
+    def get_time_icon(self, time_val, weather_val):
+        """Return QIcon for given time, considering equivalence with other times."""
+        cat_map = self._get_time_category_map(weather_val)
+        cat = cat_map.get(time_val)
+
+        if cat == 'daytime':
+            path = self.get_icon_path('time_daytime.png')
+            if path:
+                return QIcon(path)
+        elif cat == 'night':
+            # You could use a separate icon for "night only", but here we keep night icon
+            path = self.get_icon_path('time_night.png')
+            if path:
+                return QIcon(path)
+        elif cat == 'anytime':
+            path = self.get_icon_path('time_anytime.png')
+            if path:
+                return QIcon(path)
+
+        # Fallback to per-time icon
+        try:
+            time_name = LATime(time_val).name.lower()
+        except ValueError:
+            return None
+        icon_map = {
+            'dawn': 'time_dawn.png',
+            'day': 'time_day.png',
+            'dusk': 'time_dusk.png',
+            'night': 'time_night.png',
+        }
+        filename = icon_map.get(time_name)
+        if filename:
+            path = self.get_icon_path(filename)
+            return QIcon(path)
+        return None
 
     def generate(self) -> None:
         """Generate paths for spawner"""
@@ -349,18 +500,31 @@ class GeneratorWindow(QDialog):
                 self.shiny_rolls_comboboxes[species].currentData() + extra_shiny_rolls,
                 len(filtered_species) == 0 or (species, form) in filtered_species,
             )
+            
+        # Determine weather/time combos
+        weather_data = self.weather_combobox.currentData()
+        time_data = self.time_combobox.currentData()
+        
+        if self.spawner.is_mass_outbreak:
+            # Outbreaks: widgets hidden, so weather_data/time_data are not None (no "All" option)
+            combos = [(weather_data, time_data)]
+        else:
+            time_filter = None if time_data is None else time_data
+            weather_filter = None if weather_data is None else weather_data
+            combos = self.get_distinct_combos(self.encounter_table, time_filter, weather_filter)
 
         if self.spawner.is_mass_outbreak or self.spawner.min_spawn_count != self.spawner.max_spawn_count:
-            self.progress_bar.setMaximum(compute_result_count_variable(starting_path))
+            per_combo = compute_result_count_variable(starting_path)
         else:
-            self.progress_bar.setMaximum(compute_result_count(self.spawner.max_spawn_count, advance_range.stop))
-
+            per_combo = compute_result_count(self.spawner.max_spawn_count, advance_range.stop)
+        
+        per_combo_progress = [per_combo] * len(combos)
+        total_progress = per_combo * len(combos)
+        self.progress_bar.setMaximum(total_progress)
+        
+        # Build base_args (without weather/time)
         if self.spawner.is_mass_outbreak:
-            self.generator_update_thread = GeneratorUpdateThread(
-                self,
-                True,
-                False,
-                shortest_path_filter,
+            base_args = (
                 seed,
                 self.first_wave_spawn_count.value(),
                 self.second_wave_spawn_count.value() if self.has_second_wave else 0,
@@ -375,17 +539,11 @@ class GeneratorWindow(QDialog):
                 iv_filters,
             )
         elif self.spawner.min_spawn_count != self.spawner.max_spawn_count:
-            self.generator_update_thread = GeneratorUpdateThread(
-                self,
-                False,
-                True,
-                shortest_path_filter,
+            base_args = (
                 seed,
                 starting_path,
                 self.spawner.max_spawn_count,
                 self.encounter_table,
-                self.weather_combobox.currentData(),
-                self.time_combobox.currentData(),
                 species_info,
                 filtered_genders,
                 filtered_natures,
@@ -395,19 +553,13 @@ class GeneratorWindow(QDialog):
                 iv_filters,
             )
         else:
-            self.generator_update_thread = GeneratorUpdateThread(
-                self,
-                False,
-                False,
-                shortest_path_filter,
+            base_args = (
                 seed,
                 starting_path,
                 advance_range.start,
                 advance_range.stop,
                 self.spawner.max_spawn_count,
                 self.encounter_table,
-                self.weather_combobox.currentData(),
-                self.time_combobox.currentData(),
                 species_info,
                 filtered_genders,
                 filtered_natures,
@@ -416,6 +568,16 @@ class GeneratorWindow(QDialog):
                 alpha_filter,
                 iv_filters,
             )
+
+        self.generator_update_thread = GeneratorUpdateThread(
+            self,
+            self.spawner.is_mass_outbreak,
+            self.spawner.min_spawn_count != self.spawner.max_spawn_count,
+            shortest_path_filter,
+            combos,
+            per_combo_progress,
+            *base_args
+        )
         self.generator_update_thread.progress.connect(self.progress_bar.setValue)
 
         def cleanup_generate():
@@ -461,7 +623,10 @@ class GeneratorWindow(QDialog):
             shiny,
             height,
             weight,
+            weather_val,
+            time_val,
         ) = row
+        
         personal_info = get_personal_info(species, form)
         personal_index = get_personal_index(species, form)
         display_size_metric = calc_display_size(
@@ -472,26 +637,56 @@ class GeneratorWindow(QDialog):
         )
         row_i = self.result_table.rowCount()
         self.result_table.insertRow(row_i)
-        row = (
-            advance,
-            path_to_string(path)
-            if self.spawner.max_spawn_count != 1
-            else "N/A",
-            get_name_en(species, form, is_alpha),
-            "Square" if shiny == 2 else "Star" if shiny else "No",
-            "Yes" if is_alpha else "No",
-            NATURES_EN[nature],
-            ABILITIES_EN[
-                personal_info.ability_2 if ability else personal_info.ability_1
-            ],
-            *(str(iv) for iv in ivs),
-            "♂" if gender == 0 else "♀" if gender == 1 else "○",
-            f"{display_size_metric[0]:.02f} m | {display_size_imperial[0][0]:.00f}'{display_size_imperial[0][1]:.00f}\" ({height})",
-            f"{display_size_metric[1]:.02f} kg | {display_size_imperial[1]:.01f} lbs ({weight})",
-        )
-        for j, value in enumerate(row):
-            item = QTableWidgetItem()
-            item.setData(Qt.EditRole, value)
+        
+        advance_item = QTableWidgetItem(str(advance))
+
+        path_str = path_to_string(path) if self.spawner.max_spawn_count != 1 else "N/A"
+        path_item = QTableWidgetItem(path_str)
+
+        # Weather item (with icon if available)
+        weather_item = QTableWidgetItem()
+        weather_icon = self.get_weather_icon(weather_val)
+        if weather_icon:
+            weather_item.setIcon(weather_icon)
+        else:
+            weather_item.setText(LAWeather(weather_val).name.title() if weather_val < len(LAWeather) else "Unknown")
+
+        # Time item (with icon if available)
+        time_item = QTableWidgetItem()
+        time_icon = self.get_time_icon(time_val, weather_val)
+        if time_icon:
+            time_item.setIcon(time_icon)
+        else:
+            time_item.setText(LATime(time_val).name.title() if time_val < len(LATime) else "Unknown")
+
+        species_item = QTableWidgetItem(get_name_en(species, form, is_alpha))
+        
+        shiny_str = "Square" if shiny == 2 else "Star" if shiny else "No"
+        shiny_item = QTableWidgetItem(shiny_str)
+        
+        alpha_str = "Yes" if is_alpha else "No"
+        alpha_item = QTableWidgetItem(alpha_str)
+
+        nature_item = QTableWidgetItem(NATURES_EN[nature])
+
+        ability_name = ABILITIES_EN[personal_info.ability_2 if ability else personal_info.ability_1]
+        ability_item = QTableWidgetItem(ability_name)
+
+        iv_items = [QTableWidgetItem(str(iv)) for iv in ivs]
+
+        gender_str = "♂" if gender == 0 else "♀" if gender == 1 else "○"
+        gender_item = QTableWidgetItem(gender_str)
+
+        height_str = f"{display_size_metric[0]:.02f} m | {display_size_imperial[0][0]:.00f}'{display_size_imperial[0][1]:.00f}\" ({height})"
+        height_item = QTableWidgetItem(height_str)
+
+        weight_str = f"{display_size_metric[1]:.02f} kg | {display_size_imperial[1]:.01f} lbs ({weight})"
+        weight_item = QTableWidgetItem(weight_str)
+
+        items = [
+            advance_item, path_item, weather_item, time_item, species_item, shiny_item, alpha_item, nature_item, ability_item, *iv_items, gender_item, height_item, weight_item
+        ]
+        for j, item in enumerate(items):
             self.result_table.setItem(row_i, j, item)
         # sort by paths first
         self.result_table.model().sort(1, Qt.AscendingOrder)
@@ -512,53 +707,55 @@ class GeneratorUpdateThread(QThread):
     progress = Signal(int)
     new_result = Signal(tuple)
 
-    def __init__(self, parent_window: GeneratorWindow, is_mass_outbreak: bool, is_variable: bool, shortest_path_only: bool, *args) -> None:
+    def __init__(self, parent_window: GeneratorWindow, is_mass_outbreak: bool, is_variable: bool, shortest_path_only: bool, combos, per_combo_progress, *args) -> None:
         super().__init__()
         self.parent_window = parent_window
-        self.parent_data_hook = np.zeros(2, np.uint64)
-        self.generator_thread = GeneratorThread(is_mass_outbreak, is_variable, *args, self.parent_data_hook)
+        self.is_mass_outbreak = is_mass_outbreak      # <-- store these!
+        self.is_variable = is_variable
         self.shortest_path_only = shortest_path_only
-        self.args = args
+        self.combos = combos
+        self.per_combo_progress = per_combo_progress
+        self.args = args                               # base args (without weather/time/parent_data)
 
-    def run(self) -> None:
+    def run(self):
         """Thread work"""
-        self.generator_thread.start()
-
-        if isinstance(self.args[3], EncounterAreaLA):
-            total_progress = compute_result_count_variable(self.args[1])
-        else:
-            total_progress = compute_result_count(self.args[4], self.args[3])
-
-        result_count = 0
+        cumulative = 0
         result_ids = set()
-        while True:
-            # checking here ensures final copied data is from after the thread finishes
-            thread_finished = (
-                self.isInterruptionRequested()
-                or not self.generator_thread.isRunning()
-            )
-            progress = self.parent_data_hook[0]
-            self.parent_data_hook[1] = self.isInterruptionRequested()
-            self.progress.emit(progress)
-            # copy here to dodge thread issues
-            results = list(self.generator_thread.results)
-            if len(results) > result_count:
-                for row in results[result_count:]:
-                    if self.shortest_path_only:
-                        result_id = row[3] | (row[4] << 32)
-                        if result_id not in result_ids:
-                            self.parent_window.add_result(row)
-                            result_ids.add(result_id)
-                    else:
-                        self.parent_window.add_result(row)
-                result_count = len(results)
-            if (
-                progress == total_progress
-                or thread_finished
-            ):
+        for idx, (time_val, weather_val) in enumerate(self.combos):
+            if self.isInterruptionRequested():
                 break
-            time.sleep(1)
-        self.generator_thread.wait()
+
+            parent_data = np.zeros(2, np.uint64)
+
+            full_args = self.args + (weather_val, time_val, parent_data)
+
+            generator_thread = GeneratorThread(
+                self.is_mass_outbreak,
+                self.is_variable,
+                *full_args
+            )
+            generator_thread.start()
+
+            while generator_thread.isRunning():
+                if self.isInterruptionRequested():
+                    parent_data[1] = 1
+                    break
+                self.progress.emit(cumulative + parent_data[0])
+                time.sleep(0.1)   # now `time` refers to the module
+
+            generator_thread.wait()
+
+            for row in generator_thread.results:
+                if self.shortest_path_only:
+                    result_id = row[3] | (row[4] << 32)
+                    if result_id not in result_ids:
+                        self.parent_window.add_result(row)
+                        result_ids.add(result_id)
+                else:
+                    self.parent_window.add_result(row)
+
+            cumulative += self.per_combo_progress[idx]
+            self.progress.emit(cumulative)
 
 
 class GeneratorThread(QThread):
@@ -580,6 +777,8 @@ class GeneratorThread(QThread):
                     np.uint32(0),
                     np.uint32(0),
                     np.zeros(6, np.uint8),
+                    np.uint8(0),
+                    np.uint8(0),
                     np.uint8(0),
                     np.uint8(0),
                     np.uint8(0),

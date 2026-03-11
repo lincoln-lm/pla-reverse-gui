@@ -7,7 +7,7 @@ from qtpy.QtWidgets import (
     QMenu,
     QAction,
 )
-from qtpy.QtCore import Qt
+from qtpy.QtCore import Qt, QSize
 
 # pylint: enable=no-name-in-module
 from .path_tracker_window import PathTrackerWindow
@@ -20,6 +20,8 @@ class ResultTableWidget(QTableWidget):
     COLUMNS = (
         ("Advances", 100),
         ("Path", 100),
+        ("Weather", 60),
+        ("Time", 60),
         ("Species", 100),
         ("Shiny", 80),
         ("Alpha", 80),
@@ -39,11 +41,12 @@ class ResultTableWidget(QTableWidget):
     def __init__(self):
         super().__init__()
 
-        self.setColumnCount(16)
+        self.setColumnCount(18)
         self.setHorizontalHeaderLabels([column[0] for column in self.COLUMNS])
         for i, (_, width) in enumerate(self.COLUMNS):
             self.setColumnWidth(i, width)
 
+        self.setIconSize(QSize(28, 28))
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.verticalHeader().setVisible(False)
         self.setContextMenuPolicy(Qt.CustomContextMenu)
