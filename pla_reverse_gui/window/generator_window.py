@@ -12,7 +12,7 @@ from numba_pokemon_prngs.data.encounter import (
 )
 from numba_pokemon_prngs.data import NATURES_EN, ABILITIES_EN
 from numba_pokemon_prngs.data.fbs.encounter_la import PlacementSpawner8a
-from numba_pokemon_prngs.enums import LAWeather, LATime
+from numba_pokemon_prngs.enums import LAWeather, LATime, LAArea
 
 # pylint: disable=no-name-in-module
 from numba.typed import Dict as TypedDict
@@ -29,7 +29,7 @@ from qtpy.QtWidgets import (
     QTableWidgetItem,
     QSpinBox,
 )
-from qtpy.QtGui import QRegularExpressionValidator, QIcon
+from qtpy.QtGui import QRegularExpressionValidator, QIcon, QPainter, QPixmap
 from qtpy import QtCore
 from qtpy.QtCore import QThread, Signal, Qt
 
@@ -45,6 +45,31 @@ from ..generator import generate_standard, generate_mass_outbreak, generate_vari
 from ..pla_reverse_main.pla_reverse.size import calc_display_size
 from .eta_progress_bar import ETAProgressBar
 
+# Weathers that can actually occur on each area (excluding NONE, which is always possible)
+AREA_WEATHERS = {
+    LAArea.OBSIDIAN_FIELDLANDS: [
+        LAWeather.SUNNY, LAWeather.CLOUDY, LAWeather.RAIN,
+        LAWeather.DROUGHT, LAWeather.FOG, LAWeather.RAINSTORM
+    ],
+    LAArea.CRIMSON_MIRELANDS: [
+        LAWeather.SUNNY, LAWeather.RAIN, LAWeather.CLOUDY,
+        LAWeather.FOG, LAWeather.RAINSTORM
+    ],
+    LAArea.COBALT_COASTLANDS: [
+        LAWeather.SUNNY, LAWeather.DROUGHT, LAWeather.RAIN,
+        LAWeather.RAINSTORM, LAWeather.CLOUDY, LAWeather.FOG
+    ],
+    LAArea.CORONET_HIGHLANDS: [
+        LAWeather.SUNNY, LAWeather.CLOUDY, LAWeather.RAIN,
+        LAWeather.SNOW, LAWeather.FOG, LAWeather.RAINSTORM,
+        LAWeather.SNOWSTORM
+    ],
+    LAArea.ALABASTER_ICELANDS: [
+        LAWeather.SUNNY, LAWeather.SNOW, LAWeather.SNOWSTORM,
+        LAWeather.CLOUDY
+    ],
+}
+# For any sub‑area (like SEASIDE_HOLLOW), use the base area weathers
 
 def compute_result_count(max_spawn_count: int, max_path_length: int) -> int:
     """Calculate the total amount of results to be generated for a given spawner and max path length"""
@@ -106,8 +131,10 @@ class GeneratorWindow(QDialog):
         spawner: PlacementSpawner8a,
         encounter_table: EncounterAreaLA,
         second_wave_encounter_table: EncounterAreaLA,
+        area: LAArea,
     ) -> None:
         super().__init__(parent)
+        self.area = area
         self.generator_update_thread = None
         self.spawner = spawner
         self.encounter_table = encounter_table
@@ -134,6 +161,11 @@ class GeneratorWindow(QDialog):
         self.seed_base_combobox = QComboBox()
         self.seed_base_combobox.addItem("Hexadecimal", 16)
         self.seed_base_combobox.addItem("Decimal", 10)
+        
+        self.id_counter = 0          # not strictly needed now, but kept for clarity
+        self.id_to_weather = {}      # id -> set of weather values
+        self.id_to_time = {}         # id -> set of time values
+        
         def seed_base_changed(index: int) -> None:
             is_hex = index == 0
             previous_text = self.seed_input.text()
@@ -305,6 +337,7 @@ class GeneratorWindow(QDialog):
         self.generate_button.clicked.connect(self.generate)
 
         self.result_table = ResultTableWidget()
+        self.result_table.parent_window = self
         self.main_layout.addWidget(self.top_widget)
         self.main_layout.addWidget(self.generate_button)
         self.main_layout.addWidget(self.progress_bar)
@@ -314,39 +347,60 @@ class GeneratorWindow(QDialog):
             self.height(),
         )
         
-    def get_distinct_combos(self, area: EncounterAreaLA, time_filter=None, weather_filter=None):
-        times = list(LATime)
-        weathers = list(LAWeather)
-        combos = []
-        seen = set()
-
-        if len(area.slots) == 0:
-            return combos
-            
-        base_probs = area.slots['base_probability']
-        time_mult = area.slots['time_multipliers']   # shape (n_slots, len(LATime))
-        weather_mult = area.slots['weather_multipliers']
+        self.row_weather_sets = {}   # row index -> set of weather values
+        self.row_time_sets = {}      # row index -> set of time values
         
+    def get_distinct_combos(self, area: EncounterAreaLA, time_filter=None, weather_filter=None, allowed_weathers=None):
+        times = list(LATime)
+        if weather_filter is not None:
+            weathers = [weather_filter]
+        elif allowed_weathers is not None:
+            weathers = allowed_weathers
+        else:
+            weathers = list(LAWeather)
+
+        # Use DAWN as reference time to group weathers by their probability vector
+        base_probs = area.slots['base_probability']
+        time_mult = area.slots['time_multipliers']
+        weather_mult = area.slots['weather_multipliers']
+        t_ref = LATime.DAWN
+        t_idx = t_ref.value
+
+        vector_by_weather = {}
+        for w in weathers:
+            w_idx = w.value
+            probs = base_probs * time_mult[:, t_idx] * weather_mult[:, w_idx]
+            total = np.sum(probs)
+            norm = probs / total if total > 0 else probs
+            vector_by_weather[w.value] = tuple(np.round(norm, decimals=6))
+
+        # Group by vector
+        groups = {}
+        for w_val, vec in vector_by_weather.items():
+            groups.setdefault(vec, []).append(w_val)
+
+        # Choose a representative for each group (smallest value – ensures NONE=0 is rep if present)
+        rep_to_weathers = {}
+        weather_to_rep = {}
+        for vec, wlist in groups.items():
+            rep = min(wlist)
+            rep_to_weathers[rep] = wlist
+            for w in wlist:
+                weather_to_rep[w] = rep
+
+        # Build combos (time, rep) for all times, using the reps
+        combos = []
         for t in times:
             if time_filter is not None and t != time_filter:
                 continue
-            t_idx = t.value
-            for w in weathers:
-                if weather_filter is not None and w != weather_filter:
-                    continue
-                w_idx = w.value
-                probs = base_probs * time_mult[:, t_idx] * weather_mult[:, w_idx]
-                total = np.sum(probs)
-                if total > 0:
-                    norm_probs = probs / total
-                else:
-                    norm_probs = probs
-                # quantize to avoid floating noise
-                key = tuple(np.round(norm_probs, decimals=6))
-                if key not in seen:
-                    seen.add(key)
-                    combos.append((t, w))
-        return combos
+            reps_seen = set()
+            for w_val in vector_by_weather.keys():
+                rep = weather_to_rep[w_val]
+                if rep not in reps_seen:
+                    reps_seen.add(rep)
+                    combos.append((t, rep))
+
+        return combos, rep_to_weathers
         
     def _get_time_category_map(self, weather_val):
         """Return a dict mapping time value -> category for the given weather."""
@@ -421,24 +475,38 @@ class GeneratorWindow(QDialog):
             return QIcon(path)
         return None
 
-    def get_time_icon(self, time_val, weather_val):
-        """Return QIcon for given time, considering equivalence with other times."""
-        cat_map = self._get_time_category_map(weather_val)
-        cat = cat_map.get(time_val)
-
-        if cat == 'daytime':
-            path = self.get_icon_path('time_daytime.png')
-            if path:
-                return QIcon(path)
-        elif cat == 'night':
-            # You could use a separate icon for "night only", but here we keep night icon
-            path = self.get_icon_path('time_night.png')
-            if path:
-                return QIcon(path)
-        elif cat == 'anytime':
-            path = self.get_icon_path('time_anytime.png')
-            if path:
-                return QIcon(path)
+    def get_time_icon(self, time_val, weather_val=None):
+        if weather_val is not None:
+            cat_map = self._get_time_category_map(weather_val)
+            cat = cat_map.get(time_val)
+            if cat == 'daytime':
+                path = self.get_icon_path('time_daytime.png')
+                if path:
+                    return QIcon(path)
+            elif cat == 'night':
+                path = self.get_icon_path('time_night.png')
+                if path:
+                    return QIcon(path)
+            elif cat == 'anytime':
+                path = self.get_icon_path('time_anytime.png')
+                if path:
+                    return QIcon(path)
+        # Fallback to per-time icon
+        try:
+            time_name = LATime(time_val).name.lower()
+        except ValueError:
+            return None
+        icon_map = {
+            'dawn': 'time_dawn.png',
+            'day': 'time_day.png',
+            'dusk': 'time_dusk.png',
+            'night': 'time_night.png',
+        }
+        filename = icon_map.get(time_name)
+        if filename:
+            path = self.get_icon_path(filename)
+            return QIcon(path)
+        return None
 
         # Fallback to per-time icon
         try:
@@ -456,6 +524,14 @@ class GeneratorWindow(QDialog):
             path = self.get_icon_path(filename)
             return QIcon(path)
         return None
+
+    def find_row_by_id(self, target_id):
+        """Return row index of the item with the given ID, or -1 if not found."""
+        for row in range(self.result_table.rowCount()):
+            item = self.result_table.item(row, 18)
+            if item and item.data(Qt.UserRole) == target_id:
+                return row
+        return -1
 
     def generate(self) -> None:
         """Generate paths for spawner"""
@@ -506,17 +582,29 @@ class GeneratorWindow(QDialog):
         time_data = self.time_combobox.currentData()
         
         if self.spawner.is_mass_outbreak:
-            # Outbreaks: widgets hidden, so weather_data/time_data are not None (no "All" option)
             combos = [(weather_data, time_data)]
         else:
             time_filter = None if time_data is None else time_data
             weather_filter = None if weather_data is None else weather_data
-            combos = self.get_distinct_combos(self.encounter_table, time_filter, weather_filter)
+            if weather_data is None:  # All Weathers selected
+                base_area = LAArea(self.area & 0xFF)
+                allowed = [LAWeather.NONE] + AREA_WEATHERS.get(base_area, [])
+                combos, rep_to_weathers = self.get_distinct_combos(
+                    self.encounter_table, time_filter, None, allowed_weathers=allowed
+                )
+                full_map_weathers = set(w.value for w in AREA_WEATHERS.get(base_area, []))
+            else:
+                combos, rep_to_weathers = self.get_distinct_combos(
+                    self.encounter_table, time_filter, weather_filter
+                )
+                full_map_weathers = None   # not used
 
         if self.spawner.is_mass_outbreak or self.spawner.min_spawn_count != self.spawner.max_spawn_count:
             per_combo = compute_result_count_variable(starting_path)
         else:
             per_combo = compute_result_count(self.spawner.max_spawn_count, advance_range.stop)
+        
+        print("Combos:", [(LATime(t).name, w) for t,w in combos])
         
         per_combo_progress = [per_combo] * len(combos)
         total_progress = per_combo * len(combos)
@@ -576,6 +664,8 @@ class GeneratorWindow(QDialog):
             shortest_path_filter,
             combos,
             per_combo_progress,
+            rep_to_weathers,
+            full_map_weathers,
             *base_args
         )
         self.generator_update_thread.progress.connect(self.progress_bar.setValue)
@@ -609,7 +699,7 @@ class GeneratorWindow(QDialog):
         self.result_table.species_info = species_info
         self.result_table.spawn_counts = starting_path
 
-    def add_result(self, row: tuple):
+    def add_result(self, row: tuple, result_id: int):
         (
             advance,
             path,
@@ -647,51 +737,79 @@ class GeneratorWindow(QDialog):
         weather_item = QTableWidgetItem()
         weather_icon = self.get_weather_icon(weather_val)
         if weather_icon:
-            weather_item.setIcon(weather_icon)
-        else:
-            weather_item.setText(LAWeather(weather_val).name.title() if weather_val < len(LAWeather) else "Unknown")
+            weather_item.setIcon(weather_icon)   # optional, but delegate will override anyway
+        weather_item.setText(LAWeather(weather_val).name.title() if weather_val < len(LAWeather) else "Unknown")
+        weather_item.setData(Qt.UserRole, [weather_val])
 
-        # Time item (with icon if available)
         time_item = QTableWidgetItem()
         time_icon = self.get_time_icon(time_val, weather_val)
         if time_icon:
             time_item.setIcon(time_icon)
-        else:
-            time_item.setText(LATime(time_val).name.title() if time_val < len(LATime) else "Unknown")
+        time_item.setText(LATime(time_val).name.title() if time_val < len(LATime) else "Unknown")
+        time_item.setData(Qt.UserRole, [time_val])
 
         species_item = QTableWidgetItem(get_name_en(species, form, is_alpha))
-        
         shiny_str = "Square" if shiny == 2 else "Star" if shiny else "No"
         shiny_item = QTableWidgetItem(shiny_str)
-        
         alpha_str = "Yes" if is_alpha else "No"
         alpha_item = QTableWidgetItem(alpha_str)
-
         nature_item = QTableWidgetItem(NATURES_EN[nature])
-
         ability_name = ABILITIES_EN[personal_info.ability_2 if ability else personal_info.ability_1]
         ability_item = QTableWidgetItem(ability_name)
-
         iv_items = [QTableWidgetItem(str(iv)) for iv in ivs]
-
         gender_str = "♂" if gender == 0 else "♀" if gender == 1 else "○"
         gender_item = QTableWidgetItem(gender_str)
-
         height_str = f"{display_size_metric[0]:.02f} m | {display_size_imperial[0][0]:.00f}'{display_size_imperial[0][1]:.00f}\" ({height})"
         height_item = QTableWidgetItem(height_str)
-
         weight_str = f"{display_size_metric[1]:.02f} kg | {display_size_imperial[1]:.01f} lbs ({weight})"
         weight_item = QTableWidgetItem(weight_str)
+        
+        # Hidden ID item
+        id_item = QTableWidgetItem()
+        id_item.setData(Qt.UserRole, result_id)
 
         items = [
-            advance_item, path_item, weather_item, time_item, species_item, shiny_item, alpha_item, nature_item, ability_item, *iv_items, gender_item, height_item, weight_item
+            advance_item, path_item, weather_item, time_item, species_item, shiny_item, alpha_item, nature_item, ability_item, *iv_items, gender_item, height_item, weight_item, id_item
         ]
         for j, item in enumerate(items):
             self.result_table.setItem(row_i, j, item)
+            
+        # Store weather/time sets for this ID
+        self.id_to_weather[result_id] = {weather_val}
+        self.id_to_time[result_id] = {time_val}
+        
         # sort by paths first
         self.result_table.model().sort(1, Qt.AscendingOrder)
         # then by advances
         self.result_table.model().sort(0, Qt.AscendingOrder)
+        
+        # Store weather/time sets for this row
+        self.row_weather_sets[row_i] = {weather_val}
+        self.row_time_sets[row_i] = {time_val}
+
+        return row_i
+        
+    def update_result(self, result_id: int, weather_val: int, time_val: int):
+        row = self.find_row_by_id(result_id)
+        if row == -1:
+            return
+
+        # Update weather set
+        weather_set = self.id_to_weather.get(result_id, set())
+        weather_set.add(weather_val)
+        self.id_to_weather[result_id] = weather_set
+        weather_item = self.result_table.item(row, 2)
+        weather_item.setData(Qt.UserRole, sorted(list(weather_set)))
+
+        # Update time set
+        time_set = self.id_to_time.get(result_id, set())
+        time_set.add(time_val)
+        self.id_to_time[result_id] = time_set
+        time_item = self.result_table.item(row, 3)
+        time_item.setData(Qt.UserRole, sorted(list(time_set)))
+
+        # Force repaint
+        self.result_table.viewport().update()
 
     def closeEvent(self, event):
         if self.generator_update_thread is not None:
@@ -707,7 +825,7 @@ class GeneratorUpdateThread(QThread):
     progress = Signal(int)
     new_result = Signal(tuple)
 
-    def __init__(self, parent_window: GeneratorWindow, is_mass_outbreak: bool, is_variable: bool, shortest_path_only: bool, combos, per_combo_progress, *args) -> None:
+    def __init__(self, parent_window: GeneratorWindow, is_mass_outbreak: bool, is_variable: bool, shortest_path_only: bool, combos, per_combo_progress, rep_to_weathers, full_map_weathers, *args) -> None:
         super().__init__()
         self.parent_window = parent_window
         self.is_mass_outbreak = is_mass_outbreak      # <-- store these!
@@ -715,12 +833,15 @@ class GeneratorUpdateThread(QThread):
         self.shortest_path_only = shortest_path_only
         self.combos = combos
         self.per_combo_progress = per_combo_progress
+        self.rep_to_weathers = rep_to_weathers      # dict: rep_val -> list of actual weather values
+        self.full_map_weathers = full_map_weathers  # set of all weather values on this map (or None)
+        self.key_to_id = {}
+        self.next_id = 0
         self.args = args                               # base args (without weather/time/parent_data)
 
     def run(self):
         """Thread work"""
         cumulative = 0
-        result_ids = set()
         for idx, (time_val, weather_val) in enumerate(self.combos):
             if self.isInterruptionRequested():
                 break
@@ -746,13 +867,39 @@ class GeneratorUpdateThread(QThread):
             generator_thread.wait()
 
             for row in generator_thread.results:
+                species, form, is_alpha = row[2]
+                ec = row[3]
+                pid = row[4]
+                path_tuple = tuple(row[1])
                 if self.shortest_path_only:
-                    result_id = row[3] | (row[4] << 32)
-                    if result_id not in result_ids:
-                        self.parent_window.add_result(row)
-                        result_ids.add(result_id)
+                    key = (species, form, is_alpha, ec, pid)
                 else:
-                    self.parent_window.add_result(row)
+                    key = (species, form, is_alpha, ec, pid, path_tuple)
+                
+                # Determine the actual weathers to add for this result
+                weather_val = row[12]
+                represented = self.rep_to_weathers.get(weather_val, [weather_val])  # fallback to itself
+                if self.full_map_weathers is not None:
+                    if set(represented) == self.full_map_weathers:
+                        weathers_to_add = [0]          # covers all map weathers → use NONE icon
+                    else:
+                        weathers_to_add = [w for w in represented if w != 0]   # exclude NONE, keep actual
+                else:
+                    weathers_to_add = [weather_val]    # single‑weather mode
+
+                if key in self.key_to_id:
+                    result_id = self.key_to_id[key]
+                    for w in weathers_to_add:
+                        self.parent_window.update_result(result_id, w, row[13])
+                else:
+                    result_id = self.next_id
+                    self.key_to_id[key] = result_id
+                    self.next_id += 1
+                    # For the first addition, we need to add the row with the first weather
+                    # We'll add the row with the first weather, then update with the rest
+                    self.parent_window.add_result(row, result_id)
+                    for w in weathers_to_add[1:]:
+                        self.parent_window.update_result(result_id, w, row[13])
 
             cumulative += self.per_combo_progress[idx]
             self.progress.emit(cumulative)
@@ -797,4 +944,5 @@ class GeneratorThread(QThread):
             generate_variable(*self.args, self.results)
         else:
             generate_standard(*self.args, self.results)
+        print(f"GeneratorThread produced {len(self.results)} results")
         self.finished.emit()

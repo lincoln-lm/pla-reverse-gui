@@ -164,8 +164,8 @@ def generate_mass_outbreak(
                 np.uint8(shiny),
                 np.uint8(height),
                 np.uint8(weight),
-                np.uint8(weather.value),
-                np.uint8(time.value),
+                np.uint8(weather),
+                np.uint8(time),
             )
             results.append(pokemon)
             # TODO: level rand?
@@ -343,8 +343,8 @@ def generate_variable(
                 np.uint8(shiny),
                 np.uint8(height),
                 np.uint8(weight),
-                np.uint8(weather.value),
-                np.uint8(time.value),
+                np.uint8(weather),
+                np.uint8(time),
             )
             results.append(pokemon)
             # TODO: level rand?
@@ -501,8 +501,8 @@ def generate_standard(
                     np.uint8(shiny),
                     np.uint8(height),
                     np.uint8(weight),
-                    np.uint8(weather.value),
-                    np.uint8(time.value),
+                    np.uint8(weather),
+                    np.uint8(time),
                 )
                 results.append(pokemon)
                 # TODO: level rand?

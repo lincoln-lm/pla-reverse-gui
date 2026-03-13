@@ -513,8 +513,9 @@ class MapWindow(QWidget):
                 np.uint64(spawner.encounter_table_id)
             ]
             second_wave_encounter_table = None
+        current_area = self.location_combobox.currentData() & 0xFF
         generator_window = GeneratorWindow(
-            self, spawner, first_encounter_table, second_wave_encounter_table
+            self, spawner, first_encounter_table, second_wave_encounter_table, current_area
         )
         generator_window.show()
         generator_window.setFocus()
