@@ -69,6 +69,9 @@ AREA_WEATHERS = {
         LAWeather.CLOUDY
     ],
 }
+
+TIME_DAYTIME = 100
+TIME_ANYTIME = 101
 # For any sub‑area (like SEASIDE_HOLLOW), use the base area weathers
 
 def compute_result_count(max_spawn_count: int, max_path_length: int) -> int:
@@ -363,7 +366,7 @@ class GeneratorWindow(QDialog):
         base_probs = area.slots['base_probability']
         time_mult = area.slots['time_multipliers']
         weather_mult = area.slots['weather_multipliers']
-        t_ref = LATime.DAWN
+        t_ref = LATime.DUSK
         t_idx = t_ref.value
 
         vector_by_weather = {}
@@ -443,39 +446,25 @@ class GeneratorWindow(QDialog):
         self._time_equiv_cache[weather_val] = category_map
         return category_map
         
-    def get_icon_path(self, icon_name: str) -> str:
-        """ Return absolute path to an icon file in resources/Icons """
-        current_dir = Path(__file__).parent
-        package_root = current_dir.parent
-        icon_path = package_root / "Resources" / "Icons" / icon_name
-        return str(icon_path)
-        
-    def get_weather_icon(self, weather_val):
-        """Return QIcon for given weather value (or None)"""
-        try:
-            weather_name = LAWeather(weather_val).name.lower()
-        except ValueError:
-            return None
+    def get_time_set(self, result_id):
+        return self.id_to_time.get(result_id, set())
 
-        icon_map = {
-            'sunny': 'weather_sunny.png',
-            'cloudy': 'weather_cloudy.png',
-            'rain': 'weather_rain.png',
-            'snow': 'weather_snow.png',
-            'drought': 'weather_drought.png',
-            'fog': 'weather_fog.png',
-            'rainstorm': 'weather_rainstorm.png',
-            'snowstorm': 'weather_snowstorm.png',
-            'none': 'weather_none.png',
-        }
-        
-        filename = icon_map.get(weather_name)
-        if filename:
-            path = self.get_icon_path(filename)
-            return QIcon(path)
-        return None
+    def set_time_set(self, result_id, time_set):
+        self.id_to_time[result_id] = time_set
+        row = self.find_row_by_id(result_id)
+        if row != -1:
+            time_item = self.result_table.item(row, 3)
+            time_item.setData(Qt.UserRole, sorted(list(time_set)))
+            time_item.setToolTip(self.format_time_tooltip(sorted(list(time_set))))
+            self.result_table.viewport().update()
 
     def get_time_icon(self, time_val, weather_val=None):
+        if time_val == TIME_DAYTIME:
+            path = self.get_icon_path('time_daytime.png')
+            return QIcon(path) if path else None
+        if time_val == TIME_ANYTIME:
+            path = self.get_icon_path('time_anytime.png')
+            return QIcon(path) if path else None
         if weather_val is not None:
             cat_map = self._get_time_category_map(weather_val)
             cat = cat_map.get(time_val)
@@ -524,6 +513,87 @@ class GeneratorWindow(QDialog):
             path = self.get_icon_path(filename)
             return QIcon(path)
         return None
+        
+    def format_time_tooltip(self, time_vals):
+        if not time_vals:
+            return ""
+        # Handle sentinel values
+        if len(time_vals) == 1:
+            v = time_vals[0]
+            if v == TIME_DAYTIME:
+                return "Dawn, Day, Dusk"
+            elif v == TIME_ANYTIME:
+                return "Dawn, Day, Dusk, Night"
+        names = []
+        for t in sorted(time_vals):
+            try:
+                names.append(LATime(t).name.title())
+            except ValueError:
+                names.append(f"Time {t}")
+        return ", ".join(names)
+        
+    def get_weather_set(self, result_id):
+        """Return the weather set for the given result ID."""
+        return self.id_to_weather.get(result_id, set())
+
+    def set_weather_set(self, result_id, weather_set):
+        """Replace the weather set for the given result ID and update the table."""
+        self.id_to_weather[result_id] = weather_set
+        row = self.find_row_by_id(result_id)
+        if row != -1:
+            weather_item = self.result_table.item(row, 2)
+            weather_item.setData(Qt.UserRole, sorted(list(weather_set)))
+            weather_item.setToolTip(self.format_weather_tooltip(sorted(list(weather_set))))
+            self.result_table.viewport().update()
+        
+    def get_weather_icon(self, weather_val):
+        """Return QIcon for given weather value (or None)"""
+        try:
+            weather_name = LAWeather(weather_val).name.lower()
+        except ValueError:
+            return None
+
+        icon_map = {
+            'sunny': 'weather_sunny.png',
+            'cloudy': 'weather_cloudy.png',
+            'rain': 'weather_rain.png',
+            'snow': 'weather_snow.png',
+            'drought': 'weather_drought.png',
+            'fog': 'weather_fog.png',
+            'rainstorm': 'weather_rainstorm.png',
+            'snowstorm': 'weather_snowstorm.png',
+            'none': 'weather_any.png',
+        }
+        
+        filename = icon_map.get(weather_name)
+        if filename:
+            path = self.get_icon_path(filename)
+            return QIcon(path)
+        return None
+        
+    def format_weather_tooltip(self, weather_vals):
+        if not weather_vals:
+            return ""
+        # Special case: only the "any weather" sentinel (0)
+        if len(weather_vals) == 1 and weather_vals[0] == 0:
+            return "Any Weather"
+        names = []
+        for w in sorted(weather_vals):
+            if w == 0:
+                names.append("Any Weather")   # shouldn't occur with others, but handle gracefully
+            else:
+                try:
+                    names.append(LAWeather(w).name.title())
+                except ValueError:
+                    names.append(f"Weather {w}")
+        return ", ".join(names)
+        
+    def get_icon_path(self, icon_name: str) -> str:
+        """ Return absolute path to an icon file in resources/Icons """
+        current_dir = Path(__file__).parent
+        package_root = current_dir.parent
+        icon_path = package_root / "Resources" / "Icons" / icon_name
+        return str(icon_path)
 
     def find_row_by_id(self, target_id):
         """Return row index of the item with the given ID, or -1 if not found."""
@@ -593,18 +663,26 @@ class GeneratorWindow(QDialog):
                     self.encounter_table, time_filter, None, allowed_weathers=allowed
                 )
                 full_map_weathers = set(w.value for w in AREA_WEATHERS.get(base_area, []))
+
+                # Compute the set of weathers that have their own representatives (excluding NONE)
+                other_reps = set(rep for rep in rep_to_weathers if rep != 0)
+                other_weathers = set()
+                for rep in other_reps:
+                    other_weathers.update(rep_to_weathers[rep])
+                # For the NONE representative, it should cover all map weathers not covered by others
+                none_weathers = full_map_weathers - other_weathers
+                rep_to_weathers[0] = list(none_weathers)
+
             else:
                 combos, rep_to_weathers = self.get_distinct_combos(
                     self.encounter_table, time_filter, weather_filter
                 )
-                full_map_weathers = None   # not used
+                full_map_weathers = None
 
         if self.spawner.is_mass_outbreak or self.spawner.min_spawn_count != self.spawner.max_spawn_count:
             per_combo = compute_result_count_variable(starting_path)
         else:
             per_combo = compute_result_count(self.spawner.max_spawn_count, advance_range.stop)
-        
-        print("Combos:", [(LATime(t).name, w) for t,w in combos])
         
         per_combo_progress = [per_combo] * len(combos)
         total_progress = per_combo * len(combos)
@@ -747,6 +825,9 @@ class GeneratorWindow(QDialog):
             time_item.setIcon(time_icon)
         time_item.setText(LATime(time_val).name.title() if time_val < len(LATime) else "Unknown")
         time_item.setData(Qt.UserRole, [time_val])
+        
+        weather_item.setToolTip(self.format_weather_tooltip([weather_val]))
+        time_item.setToolTip(self.format_time_tooltip([time_val]))
 
         species_item = QTableWidgetItem(get_name_en(species, form, is_alpha))
         shiny_str = "Square" if shiny == 2 else "Star" if shiny else "No"
@@ -810,6 +891,9 @@ class GeneratorWindow(QDialog):
 
         # Force repaint
         self.result_table.viewport().update()
+        
+        weather_item.setToolTip(self.format_weather_tooltip(sorted(list(weather_set))))
+        time_item.setToolTip(self.format_time_tooltip(sorted(list(time_set))))
 
     def closeEvent(self, event):
         if self.generator_update_thread is not None:
@@ -875,34 +959,62 @@ class GeneratorUpdateThread(QThread):
                     key = (species, form, is_alpha, ec, pid)
                 else:
                     key = (species, form, is_alpha, ec, pid, path_tuple)
-                
-                # Determine the actual weathers to add for this result
+
                 weather_val = row[12]
-                represented = self.rep_to_weathers.get(weather_val, [weather_val])  # fallback to itself
+                represented = self.rep_to_weathers.get(weather_val, [weather_val])
+
+                # Determine which weathers to actually add to the row's set
                 if self.full_map_weathers is not None:
-                    if set(represented) == self.full_map_weathers:
-                        weathers_to_add = [0]          # covers all map weathers → use NONE icon
+                    # Exclude 0 from the represented set for comparison
+                    rep_without_zero = set(represented) - {0}
+                    if rep_without_zero == self.full_map_weathers:
+                        weathers_to_add = [0]               # covers all map weathers → use "any weather" icon
                     else:
-                        weathers_to_add = [w for w in represented if w != 0]   # exclude NONE, keep actual
+                        weathers_to_add = [w for w in represented if w != 0]
                 else:
-                    weathers_to_add = [weather_val]    # single‑weather mode
+                    weathers_to_add = [weather_val]         # single‑weather mode
+
+                if not weathers_to_add:
+                    continue  # shouldn't happen
 
                 if key in self.key_to_id:
                     result_id = self.key_to_id[key]
                     for w in weathers_to_add:
                         self.parent_window.update_result(result_id, w, row[13])
                 else:
+                    # First time we see this key – create a row with the first weather
+                    first_w = weathers_to_add[0]
+                    # Build a modified row with weather_val replaced by first_w
+                    modified_row = list(row)
+                    modified_row[12] = first_w
+                    modified_row = tuple(modified_row)
                     result_id = self.next_id
                     self.key_to_id[key] = result_id
                     self.next_id += 1
-                    # For the first addition, we need to add the row with the first weather
-                    # We'll add the row with the first weather, then update with the rest
-                    self.parent_window.add_result(row, result_id)
+                    self.parent_window.add_result(modified_row, result_id)
                     for w in weathers_to_add[1:]:
                         self.parent_window.update_result(result_id, w, row[13])
 
             cumulative += self.per_combo_progress[idx]
             self.progress.emit(cumulative)
+            
+        if self.full_map_weathers is not None:
+            for result_id in list(self.key_to_id.values()):
+                current_set = self.parent_window.get_weather_set(result_id)
+                # Exclude 0 from the comparison (0 should not be present unless we already collapsed)
+                if current_set and (current_set - {0}) == self.full_map_weathers:
+                    self.parent_window.set_weather_set(result_id, {0})
+                    
+        # After all combos, collapse time sets to daytime/anytime icons if they match
+        if True:  # always do time grouping
+            for result_id in list(self.key_to_id.values()):
+                current_times = self.parent_window.get_time_set(result_id)
+                # Check if it's exactly {DAWN, DAY, DUSK}
+                if current_times == {LATime.DAWN.value, LATime.DAY.value, LATime.DUSK.value}:
+                    self.parent_window.set_time_set(result_id, {TIME_DAYTIME})
+                # Check if it's all four times
+                elif current_times == {t.value for t in LATime}:
+                    self.parent_window.set_time_set(result_id, {TIME_ANYTIME})
 
 
 class GeneratorThread(QThread):
@@ -944,5 +1056,4 @@ class GeneratorThread(QThread):
             generate_variable(*self.args, self.results)
         else:
             generate_standard(*self.args, self.results)
-        print(f"GeneratorThread produced {len(self.results)} results")
         self.finished.emit()
