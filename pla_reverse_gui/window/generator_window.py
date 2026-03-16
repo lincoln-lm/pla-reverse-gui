@@ -215,6 +215,9 @@ class GeneratorWindow(QDialog):
             self.shiny_rolls_comboboxes[
                 slot.species
             ] = shiny_rolls_combobox
+        self.allow_other_starts_checkbox = QCheckBox("Allow paths that do not start with catch-2")
+        self.allow_other_starts_checkbox.setVisible(self.spawner.max_spawn_count > 1 and not self.spawner.is_mass_outbreak)
+        self.settings_layout.addWidget(self.allow_other_starts_checkbox)
         starting_path_label = QLabel("Spawn Count Values:" if is_variable else "Starting Path:")
         starting_path_label.setVisible(self.spawner.max_spawn_count > 1 and not self.spawner.is_mass_outbreak)
         self.settings_layout.addWidget(starting_path_label)
@@ -380,6 +383,7 @@ class GeneratorWindow(QDialog):
                 False,
                 True,
                 shortest_path_filter,
+                self.allow_other_starts_checkbox.isChecked(),
                 seed,
                 starting_path,
                 self.spawner.max_spawn_count,
@@ -400,6 +404,7 @@ class GeneratorWindow(QDialog):
                 False,
                 False,
                 shortest_path_filter,
+                self.allow_other_starts_checkbox.isChecked(),
                 seed,
                 starting_path,
                 advance_range.start,
@@ -512,12 +517,13 @@ class GeneratorUpdateThread(QThread):
     progress = Signal(int)
     new_result = Signal(tuple)
 
-    def __init__(self, parent_window: GeneratorWindow, is_mass_outbreak: bool, is_variable: bool, shortest_path_only: bool, *args) -> None:
+    def __init__(self, parent_window: GeneratorWindow, is_mass_outbreak: bool, is_variable: bool, shortest_path_only: bool, allow_other_starts: bool, *args) -> None:
         super().__init__()
         self.parent_window = parent_window
         self.parent_data_hook = np.zeros(2, np.uint64)
-        self.generator_thread = GeneratorThread(is_mass_outbreak, is_variable, *args, self.parent_data_hook)
+        self.generator_thread = GeneratorThread(is_mass_outbreak, is_variable, allow_other_starts, *args, self.parent_data_hook)
         self.shortest_path_only = shortest_path_only
+        self.allow_other_starts = allow_other_starts
         self.args = args
 
     def run(self) -> None:
@@ -566,10 +572,11 @@ class GeneratorThread(QThread):
 
     finished = Signal()
 
-    def __init__(self, is_outbreak: bool, is_variable: bool, *args) -> None:
+    def __init__(self, is_outbreak: bool, is_variable: bool, allow_other_starts: bool, *args) -> None:
         super().__init__()
         self.is_outbreak = is_outbreak
         self.is_variable = is_variable
+        self.allow_other_starts = allow_other_starts
         self.args = args
         self.results = TypedList.empty_list(
             item_type=numba.typeof(
@@ -595,7 +602,7 @@ class GeneratorThread(QThread):
         if self.is_outbreak:
             generate_mass_outbreak(*self.args, self.results)
         elif self.is_variable:
-            generate_variable(*self.args, self.results)
+            generate_variable(self.args[0], self.allow_other_starts, *self.args[1:], self.results)
         else:
-            generate_standard(*self.args, self.results)
+            generate_standard(self.args[0], self.allow_other_starts, *self.args[1:], self.results)
         self.finished.emit()

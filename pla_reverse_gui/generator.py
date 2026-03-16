@@ -211,6 +211,7 @@ def generate_mass_outbreak(
 @numba.njit(nogil=True)
 def generate_variable(
     seed: np.uint64,
+    allow_other_starts: bool,
     count_values: tuple[int],
     max_spawn_count: int,
     encounter_table: EncounterAreaLA,
@@ -242,6 +243,12 @@ def generate_variable(
     queue = []
     # variable multis always start by catching 2 isolated pokemon
     queue.append(([np.uint8(2)], advance_seed(seed, 2), 0, 2))
+    # If given the option, the generator can also check starting from 0, 1 or 3
+    if allow_other_starts:
+        queue.append(([np.uint8(0)], advance_seed(seed, 0), 0, 0))
+        queue.append(([np.uint8(1)], advance_seed(seed, 1), 0, 1))
+        if max_spawn_count == 3:
+            queue.append(([np.uint8(3)], advance_seed(seed, 3), 0, 3))
     initial_advances = len(queue[0][0])
     # check parent_data[1] flag each item
     while len(queue) != 0 and parent_data[1] == 0:
@@ -357,6 +364,7 @@ def generate_variable(
 @numba.njit(nogil=True)
 def generate_standard(
     seed: np.uint64,
+    allow_other_starts: bool,
     starting_path: tuple[int],
     min_adv: int,
     max_adv: int,
@@ -395,6 +403,9 @@ def generate_standard(
         elif spawn_count > 1:
             # triple/double spawners always start by catching the two mons there
             queue.append(([np.uint8(2)], advance_seed(seed, spawn_count)))
+            
+            if allow_other_starts:
+                queue.append(([np.uint8(1)], advance_seed(seed, spawn_count)))
         if spawn_count == 3:
             # triple spawners also have the option of catching the third mon
             queue.append(([np.uint8(3)], advance_seed(seed, spawn_count)))
