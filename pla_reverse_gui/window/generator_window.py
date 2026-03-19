@@ -43,23 +43,28 @@ from ..pla_reverse_main.pla_reverse.size import calc_display_size
 from .eta_progress_bar import ETAProgressBar
 
 
-def compute_result_count(max_spawn_count: int, max_path_length: int) -> int:
-    """Calculate the total amount of results to be generated for a given spawner and max path length"""
+def compute_result_count(max_spawn_count: int, max_path_length: int, allow_other_starts: bool) -> int:
+    """Calculate the total amount of results to be generated for a given spawner, max path length and if the user allows other starting paths"""
     if max_spawn_count == 1:
         return max_path_length
-    initial_value = 1 if max_spawn_count != 3 else 2
+    if max_spawn_count == 4:
+        initial_value = 1
+    else:
+        ## In the case of 2 or 3 max spawn counts
+        initial_value = (max_spawn_count - 1) + allow_other_starts * 1
     return initial_value * (1 - max_spawn_count**max_path_length) // (1 - max_spawn_count)
 
-def compute_result_count_variable(spawn_counts: list[int]):
+def compute_result_count_variable(spawn_counts: list[int], allow_other_starts: bool):
     """Calculate the total amount of results to be generated for a given variable multi spawner"""
     # number of results at each step that have the corresponding num_spawned
+    max_spawn_count = max(spawn_counts)
     counts = {
         1: 0,
         # variable spawners always start with 2 spawns
         2: 1,
         3: 0
     }
-    total_result_count = sum(counts.values())
+    total = sum(counts.values())
     for spawn_count in spawn_counts[1:]:
         new_counts = {
             1: 0,
@@ -76,10 +81,13 @@ def compute_result_count_variable(spawn_counts: list[int]):
                 # or increase to spawn_count
                 # (this loop is the same as just looping over num_spawned - ko_count in reverse)
                 new_counts[max(num_spawned - ko_count, spawn_count)] += counts[num_spawned]
-        total_result_count += sum(new_counts.values())
+        total += sum(new_counts.values())
         counts = new_counts
-
-    return total_result_count
+        # Multiply by number of allowed initial ko values if option enabled
+    if allow_other_starts:
+        multiplier = 3 if max_spawn_count == 2 else 4
+        total *= multiplier
+    return total
 
 def labled_widget(
     label: str, widget_constructor: QWidget, *args, **kwargs
@@ -215,16 +223,50 @@ class GeneratorWindow(QDialog):
             self.shiny_rolls_comboboxes[
                 slot.species
             ] = shiny_rolls_combobox
-        starting_path_label = QLabel("Spawn Count Values:" if is_variable else "Starting Path:")
+        self.allow_other_starts_checkbox = QCheckBox("Allow paths that do not start with catch-2")
+        self.allow_other_starts_checkbox.setVisible(self.spawner.max_spawn_count > 1 and not self.spawner.is_mass_outbreak)
+        self.settings_layout.addWidget(self.allow_other_starts_checkbox)
+        
+        if is_variable:
+            initial_spawn_options = []
+            
+            if self.spawner.min_spawn_count == 1:
+                initial_spawn_options.append("1->1")
+            initial_spawn_options.append("2")
+            if self.spawner.max_spawn_count == 3:
+                initial_spawn_options.append("3")
+            
+            spawn_count_extended = QHBoxLayout()
+            
+            initial_spawn_layout = QVBoxLayout()
+            self.initial_spawn_label = QLabel("Initial\nspawns:")
+            initial_spawn_layout.addWidget(self.initial_spawn_label)
+            self.initial_spawn_box = QComboBox()
+            self.initial_spawn_box.addItems(initial_spawn_options)
+            initial_spawn_layout.addWidget(self.initial_spawn_box)
+            
+            spawn_count_layout = QVBoxLayout()
+            starting_path_label = QLabel("Spawn Count Values:")
+            spawn_count_layout.addWidget(starting_path_label)
+            self.starting_path_input = QLineEdit()
+            spawn_count_layout.addWidget(self.starting_path_input)
+            
+            spawn_count_extended.addLayout(initial_spawn_layout)
+            spawn_count_extended.addLayout(spawn_count_layout)
+            self.settings_layout.addLayout(spawn_count_extended)
+            
+        else:
+            starting_path_label = QLabel("Starting Path:")
+            self.settings_layout.addWidget(starting_path_label)
+            self.starting_path_input = QLineEdit()
+            self.settings_layout.addWidget(self.starting_path_input)
+        
         starting_path_label.setVisible(self.spawner.max_spawn_count > 1 and not self.spawner.is_mass_outbreak)
-        self.settings_layout.addWidget(starting_path_label)
-        self.starting_path_input = QLineEdit()
         # TODO: regex validation
         # self.starting_path_input.setValidator(
         #     QRegularExpressionValidator(QtCore.QRegularExpression(""))
         # )
         self.starting_path_input.setVisible(self.spawner.max_spawn_count > 1 and not self.spawner.is_mass_outbreak)
-        self.settings_layout.addWidget(self.starting_path_input)
 
         self.filter_widget = QWidget()
         self.filter_layout = QVBoxLayout(self.filter_widget)
@@ -332,6 +374,14 @@ class GeneratorWindow(QDialog):
         filtered_genders = self.gender_filter.get_checked_values()
         filtered_natures = self.nature_filter.get_checked_values()
         filtered_sizes = self.size_filter.get_checked_values()
+        # Parse initial spawns for variable spawners – use first character as integer
+        if hasattr(self, 'initial_spawn_box'):
+            selected = self.initial_spawn_box.currentText()
+            # "1->1" becomes 1, "2" becomes 2, "3" becomes 3
+            initial_spawns = int(selected[0])
+        else:
+            initial_spawns = 0
+            
         shiny_filter = self.shiny_filter.currentData() or 15
         alpha_filter = self.alpha_filter.checkState() == QtCore.Qt.Checked
         shortest_path_filter = self.shortest_path_filter.checkState() == QtCore.Qt.Checked
@@ -350,10 +400,12 @@ class GeneratorWindow(QDialog):
                 len(filtered_species) == 0 or (species, form) in filtered_species,
             )
 
-        if self.spawner.is_mass_outbreak or self.spawner.min_spawn_count != self.spawner.max_spawn_count:
-            self.progress_bar.setMaximum(compute_result_count_variable(starting_path))
+        if self.spawner.is_mass_outbreak:
+            self.progress_bar.setMaximum(compute_result_count(starting_path))
+        elif self.spawner.min_spawn_count != self.spawner.max_spawn_count:
+            self.progress_bar.setMaximum(compute_result_count_variable(starting_path, self.allow_other_starts_checkbox.isChecked()))
         else:
-            self.progress_bar.setMaximum(compute_result_count(self.spawner.max_spawn_count, advance_range.stop))
+            self.progress_bar.setMaximum(compute_result_count(self.spawner.max_spawn_count, advance_range.stop, self.allow_other_starts_checkbox.isChecked()))
 
         if self.spawner.is_mass_outbreak:
             self.generator_update_thread = GeneratorUpdateThread(
@@ -361,6 +413,8 @@ class GeneratorWindow(QDialog):
                 True,
                 False,
                 shortest_path_filter,
+                self.allow_other_starts_checkbox.isChecked(),
+                initial_spawns,
                 seed,
                 self.first_wave_spawn_count.value(),
                 self.second_wave_spawn_count.value() if self.has_second_wave else 0,
@@ -380,6 +434,8 @@ class GeneratorWindow(QDialog):
                 False,
                 True,
                 shortest_path_filter,
+                self.allow_other_starts_checkbox.isChecked(),
+                initial_spawns,
                 seed,
                 starting_path,
                 self.spawner.max_spawn_count,
@@ -400,6 +456,8 @@ class GeneratorWindow(QDialog):
                 False,
                 False,
                 shortest_path_filter,
+                self.allow_other_starts_checkbox.isChecked(),
+                initial_spawns,
                 seed,
                 starting_path,
                 advance_range.start,
@@ -512,12 +570,14 @@ class GeneratorUpdateThread(QThread):
     progress = Signal(int)
     new_result = Signal(tuple)
 
-    def __init__(self, parent_window: GeneratorWindow, is_mass_outbreak: bool, is_variable: bool, shortest_path_only: bool, *args) -> None:
+    def __init__(self, parent_window: GeneratorWindow, is_mass_outbreak: bool, is_variable: bool, shortest_path_only: bool, allow_other_starts: bool, initial_spawns: int, *args) -> None:
         super().__init__()
         self.parent_window = parent_window
         self.parent_data_hook = np.zeros(2, np.uint64)
-        self.generator_thread = GeneratorThread(is_mass_outbreak, is_variable, *args, self.parent_data_hook)
+        self.generator_thread = GeneratorThread(is_mass_outbreak, is_variable, allow_other_starts, initial_spawns, *args, self.parent_data_hook)
         self.shortest_path_only = shortest_path_only
+        self.allow_other_starts = allow_other_starts
+        self.initial_spawns = initial_spawns
         self.args = args
 
     def run(self) -> None:
@@ -525,9 +585,9 @@ class GeneratorUpdateThread(QThread):
         self.generator_thread.start()
 
         if isinstance(self.args[3], EncounterAreaLA):
-            total_progress = compute_result_count_variable(self.args[1])
+            total_progress = compute_result_count_variable(self.args[1], self.allow_other_starts)
         else:
-            total_progress = compute_result_count(self.args[4], self.args[3])
+            total_progress = compute_result_count(self.args[4], self.args[3], self.allow_other_starts)
 
         result_count = 0
         result_ids = set()
@@ -566,10 +626,12 @@ class GeneratorThread(QThread):
 
     finished = Signal()
 
-    def __init__(self, is_outbreak: bool, is_variable: bool, *args) -> None:
+    def __init__(self, is_outbreak: bool, is_variable: bool, allow_other_starts: bool, initial_spawns: int, *args) -> None:
         super().__init__()
         self.is_outbreak = is_outbreak
         self.is_variable = is_variable
+        self.allow_other_starts = allow_other_starts
+        self.initial_spawns = initial_spawns
         self.args = args
         self.results = TypedList.empty_list(
             item_type=numba.typeof(
@@ -595,7 +657,7 @@ class GeneratorThread(QThread):
         if self.is_outbreak:
             generate_mass_outbreak(*self.args, self.results)
         elif self.is_variable:
-            generate_variable(*self.args, self.results)
+            generate_variable(self.args[0], self.allow_other_starts, self.initial_spawns, *self.args[1:], self.results)
         else:
-            generate_standard(*self.args, self.results)
+            generate_standard(self.args[0], self.allow_other_starts, self.initial_spawns, *self.args[1:], self.results)
         self.finished.emit()
