@@ -212,6 +212,7 @@ def generate_mass_outbreak(
 def generate_variable(
     seed: np.uint64,
     allow_other_starts: bool,
+    initial_spawns: int,
     count_values: tuple[int],
     max_spawn_count: int,
     encounter_table: EncounterAreaLA,
@@ -241,14 +242,20 @@ def generate_variable(
     fixed_rng = Xoroshiro128PlusRejection(0, 0)
 
     queue = []
-    # variable multis always start by catching 2 isolated pokemon
-    queue.append(([np.uint8(2)], advance_seed(seed, 2), 0, 2))
-    # If given the option, the generator can also check starting from 0, 1 or 3
-    if allow_other_starts:
-        queue.append(([np.uint8(0)], advance_seed(seed, 0), 0, 0))
-        queue.append(([np.uint8(1)], advance_seed(seed, 1), 0, 1))
-        if max_spawn_count == 3:
-            queue.append(([np.uint8(3)], advance_seed(seed, 3), 0, 3))
+
+    for i in range(initial_spawns + 1):
+        # If it's 1, then it's the 1->1 path
+        if initial_spawns == 1:
+            for j in range(initial_spawns + 1):
+                # If the user chooses to allow other starts, 0->0, 0->1 and 1->0 will be included, and if not only 1->1 starts will be included in the queue
+                if i == 1 and j == 1 or allow_other_starts:
+                    queue.append(([np.uint8(i), np.uint8(j)], advance_seed(advance_seed(seed, i), j), 0, 1))
+        # If it's 2 or 3
+        else:
+            # If the user chooses to allow other starts, 0->, 1->, 2->, (3-> if /3 spawner) will be included, if not only the initial spawn number will be included in the queue
+            if i == initial_spawns or allow_other_starts:
+                queue.append(([np.uint8(i)], advance_seed(seed, i), 0, 3))
+        
     initial_advances = len(queue[0][0])
     # check parent_data[1] flag each item
     while len(queue) != 0 and parent_data[1] == 0:
@@ -365,6 +372,7 @@ def generate_variable(
 def generate_standard(
     seed: np.uint64,
     allow_other_starts: bool,
+    initial_spawns,
     starting_path: tuple[int],
     min_adv: int,
     max_adv: int,
@@ -403,7 +411,7 @@ def generate_standard(
         elif spawn_count > 1:
             # triple/double spawners always start by catching the two mons there
             queue.append(([np.uint8(2)], advance_seed(seed, spawn_count)))
-            
+
             if allow_other_starts:
                 queue.append(([np.uint8(1)], advance_seed(seed, spawn_count)))
         if spawn_count == 3:
