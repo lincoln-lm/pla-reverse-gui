@@ -30,7 +30,7 @@ from qtpy.QtWidgets import (
 )
 from qtpy.QtGui import QRegularExpressionValidator
 from qtpy import QtCore
-from qtpy.QtCore import QThread, Signal, Qt
+from qtpy.QtCore import QThread, Signal, Qt, QSettings
 
 # pylint: enable=no-name-in-module
 
@@ -211,6 +211,22 @@ class GeneratorWindow(QDialog):
                 ("Shiny Charm + Perfect Research", 7),
             ):
                 shiny_rolls_combobox.addItem(*item)
+                
+            # Load settings:
+            settings = QSettings("PLAReverseGUI", "Settings")
+            shiny_charm = settings.value("shinyCharm", False, bool)
+            research_level = settings.value(f"species/{slot.species}/researchLevel", 0, int)  # 0=Base, 1=Level10, 2=Perfect
+
+            # Map to combobox index
+            if research_level == 0:          # Base
+                target_index = 3 if shiny_charm else 0              # Base Research only (charm ignored)
+            elif research_level == 1:        # Level 10
+                target_index = 3 if shiny_charm else 1
+            else:                            # Perfect
+                target_index = 4 if shiny_charm else 2
+
+            shiny_rolls_combobox.setCurrentIndex(target_index)
+            
             self.settings_layout.addWidget(shiny_rolls_outer)
             self.shiny_rolls_comboboxes[
                 slot.species
@@ -301,6 +317,21 @@ class GeneratorWindow(QDialog):
         self.main_layout.addWidget(self.generate_button)
         self.main_layout.addWidget(self.progress_bar)
         self.main_layout.addWidget(self.result_table)
+        
+        # Apply global search preferences from settings
+        settings = QSettings("PLAReverseGUI", "Settings")
+        if settings.value("alwaysSearchShiny", False, bool):
+            shiny_type = settings.value("shinyType", 2, int)  # 0=Star,1=Square,2=Any
+            # Map to combobox index: Star=1, Square=2, Any=3 (Star/Square)
+            if shiny_type == 0:
+                self.shiny_filter.setCurrentIndex(1)  # Star
+            elif shiny_type == 1:
+                self.shiny_filter.setCurrentIndex(2)  # Square
+            else:
+                self.shiny_filter.setCurrentIndex(3)  # Star/Square
+        if settings.value("alwaysSearchAlpha", False, bool):
+            self.alpha_filter.setChecked(True)
+        
         self.resize(
             sum(column[1] for column in self.result_table.COLUMNS),
             self.height(),
