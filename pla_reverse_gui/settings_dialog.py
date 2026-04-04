@@ -165,19 +165,20 @@ class SettingsDialog(QDialog):
 
     def update_change_all_combo(self):
         """Add or remove 'Base Research' from the change-all dropdown based on charm state."""
-        current_index = self.change_all_combo.currentIndex()
+        self.change_all_combo.blockSignals(True)   # <-- prevent signal emission
         current_text = self.change_all_combo.currentText()
         self.change_all_combo.clear()
         if self.charm_check.isChecked():
             self.change_all_combo.addItems(["Research Level 10", "Perfect Research"])
         else:
             self.change_all_combo.addItems(["Base Research", "Research Level 10", "Perfect Research"])
-        # Try to restore the previous selection if possible
+        # Try to restore previous selection if possible
         index = self.change_all_combo.findText(current_text)
         if index >= 0:
             self.change_all_combo.setCurrentIndex(index)
         else:
             self.change_all_combo.setCurrentIndex(0)
+        self.change_all_combo.blockSignals(False)
 
     def change_all_research_level(self, index):
         """Set all species combos to the selected research level."""
