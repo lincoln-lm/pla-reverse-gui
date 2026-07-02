@@ -517,6 +517,8 @@ class GeneratorUpdateThread(QThread):
         self.parent_window = parent_window
         self.parent_data_hook = np.zeros(2, np.uint64)
         self.generator_thread = GeneratorThread(is_mass_outbreak, is_variable, *args, self.parent_data_hook)
+        self.is_mass_outbreak = is_mass_outbreak
+        self.is_variable = is_variable
         self.shortest_path_only = shortest_path_only
         self.args = args
 
@@ -524,8 +526,10 @@ class GeneratorUpdateThread(QThread):
         """Thread work"""
         self.generator_thread.start()
 
-        if isinstance(self.args[3], EncounterAreaLA):
+        if self.is_variable:
             total_progress = compute_result_count_variable(self.args[1])
+        elif self.is_mass_outbreak:
+            total_progress = -1
         else:
             total_progress = compute_result_count(self.args[4], self.args[3])
 
